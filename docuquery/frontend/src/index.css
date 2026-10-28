@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+html {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+  margin: 0;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 rounded-full;
+}
