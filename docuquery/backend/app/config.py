@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     # Infrastructure
     database_url: str = "postgresql+psycopg://docuquery:docuquery@localhost:5433/docuquery"
     redis_url: str = "redis://localhost:6379/0"
+    use_celery: bool = False  # By default in dev, use in-process BackgroundTasks to avoid hung queues
 
     # Ingestion / chunking
     chunk_size: int = 1000
@@ -59,5 +60,8 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
-    settings.upload_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        settings.upload_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
     return settings

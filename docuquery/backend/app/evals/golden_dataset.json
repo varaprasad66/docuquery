@@ -1,0 +1,162 @@
+[
+  {
+    "id": "eval-01",
+    "question": "What is the primary thesis regarding AI agents and human creativity?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 1,
+    "ground_truth": "AI agents exhibit assistive and divergent creative capabilities, collaborating with human operators rather than completely replacing autonomous human creative intent.",
+    "category": "conceptual"
+  },
+  {
+    "id": "eval-02",
+    "question": "What metrics are proposed to evaluate the novelty and value of agent-generated artifacts?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 3,
+    "ground_truth": "Boden's creativity criteria including novelty (P-creativity and H-creativity), value, and surprise, augmented by domain-specific human judges and semantic distance metrics.",
+    "category": "technical"
+  },
+  {
+    "id": "eval-03",
+    "question": "How does the paper differentiate exploratory creativity from transformational creativity?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 5,
+    "ground_truth": "Exploratory creativity traverses defined conceptual spaces within established rules, whereas transformational creativity alters the underlying rules or dimensions of the conceptual space.",
+    "category": "conceptual"
+  },
+  {
+    "id": "eval-04",
+    "question": "What role does memory or cognitive architecture play in agentic creative workflows?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 7,
+    "ground_truth": "Episodic and associative memory structures allow agents to retrieve analogies and cross-domain concepts to synthesize novel solutions.",
+    "category": "architecture"
+  },
+  {
+    "id": "eval-05",
+    "question": "What are the limitations of pure LLM generation without interactive feedback loops?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 11,
+    "ground_truth": "Feedforward token generation lacks self-critique, convergence toward defined aesthetic criteria, and iterative refinement mechanisms.",
+    "category": "technical"
+  },
+  {
+    "id": "eval-06",
+    "question": "How does multi-agent debate influence the creative diversity of candidate outputs?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 14,
+    "ground_truth": "Multi-agent debate introduces divergent perspectives and dialectic tension that prevents premature mode collapse in ideation.",
+    "category": "architecture"
+  },
+  {
+    "id": "eval-07",
+    "question": "What ethical considerations or attribution challenges are raised in the paper?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 20,
+    "ground_truth": "Attribution of provenance, copyright boundaries of pre-training corpora, and dilution of human authorship credits.",
+    "category": "ethics"
+  },
+  {
+    "id": "eval-08",
+    "question": "What is the annual paid time off (PTO) accrual policy in the employee handbook?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "Full-time employees accrue 20 days of paid time off per calendar year, escalating to 25 days after 3 years of service.",
+    "category": "policy"
+  },
+  {
+    "id": "eval-09",
+    "question": "What is the maximum rollover of unused vacation days into the next year?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "Up to 5 unused PTO days may roll over into the following calendar year, expiring on March 31st.",
+    "category": "policy"
+  },
+  {
+    "id": "eval-10",
+    "question": "What is the core working hours requirement for remote and hybrid employees?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "Core collaboration hours are 10:00 AM to 3:00 PM in the employee's local time zone.",
+    "category": "policy"
+  },
+  {
+    "id": "eval-11",
+    "question": "What is the annual health and wellness equipment reimbursement stipend?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "An annual home office and wellness stipend of up to $1,200 is reimbursed per employee.",
+    "category": "finance"
+  },
+  {
+    "id": "eval-12",
+    "question": "What is the procedure for reporting a security incident or suspected data breach?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "Immediately report to security@company.internal or page the on-call security officer within 1 hour.",
+    "category": "security"
+  },
+  {
+    "id": "eval-13",
+    "question": "What is the total amount due on invoice #INV-2026-089?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "$14,850.00 USD",
+    "category": "finance"
+  },
+  {
+    "id": "eval-14",
+    "question": "What are the payment terms specified on the Acme invoice?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "Net 30 days from invoice date via ACH or wire transfer.",
+    "category": "finance"
+  },
+  {
+    "id": "eval-15",
+    "question": "What line items and quantities are billed on the Acme invoice?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "Cloud Infrastructure Migration (120 hours @ $95/hr) and Enterprise Security Audit (35 hours @ $100/hr).",
+    "category": "finance"
+  },
+  {
+    "id": "eval-16",
+    "question": "Who is the billing contact and address for Acme Corp on the invoice?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "Acme Solutions Inc., 450 Innovation Parkway, Suite 300, Austin TX 78701.",
+    "category": "finance"
+  },
+  {
+    "id": "eval-17",
+    "question": "What discount or penalty applies for late payment on the invoice?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "A 1.5% monthly finance charge applies to outstanding balances past 30 days.",
+    "category": "finance"
+  },
+  {
+    "id": "eval-18",
+    "question": "Does the company provide parental leave, and for how long?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "16 weeks of fully paid parental leave for primary caregivers and 8 weeks for secondary caregivers.",
+    "category": "policy"
+  },
+  {
+    "id": "eval-19",
+    "question": "What is the 401(k) company match percentage?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "100% match on the first 4% of eligible employee salary contributions.",
+    "category": "finance"
+  },
+  {
+    "id": "eval-20",
+    "question": "How are combinatorial ideas explored in agent prompt chains?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 16,
+    "ground_truth": "By decomposing queries into orthogonal attribute spaces and recombining them using structured prompt templates with temperature variations.",
+    "category": "technical"
+  }
+]

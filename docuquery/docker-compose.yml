@@ -27,5 +27,69 @@ services:
       timeout: 3s
       retries: 12
 
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: docuquery-backend
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8100"
+    ports:
+      - "8100:8100"
+    environment:
+      - DATABASE_URL=postgresql+psycopg://docuquery:docuquery@db:5432/docuquery
+      - REDIS_URL=redis://redis:6379/0
+      - LLM_BASE_URL=http://host.docker.internal:11434/v1
+      - LLM_API_KEY=ollama
+      - LLM_MODEL=qwen2.5:3b
+      - EMBEDDINGS_BASE_URL=http://host.docker.internal:11434/v1
+      - EMBEDDINGS_API_KEY=ollama
+      - EMBEDDINGS_MODEL=nomic-embed-text
+      - EMBED_DIM=768
+    volumes:
+      - ./backend/uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: docuquery-worker
+    command: celery -A app.workers.celery_app worker -l info
+    environment:
+      - DATABASE_URL=postgresql+psycopg://docuquery:docuquery@db:5432/docuquery
+      - REDIS_URL=redis://redis:6379/0
+      - EMBEDDINGS_BASE_URL=http://host.docker.internal:11434/v1
+      - EMBEDDINGS_API_KEY=ollama
+      - EMBEDDINGS_MODEL=nomic-embed-text
+      - EMBED_DIM=768
+      - DEBUG=False
+    volumes:
+      - ./backend/uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: docuquery-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
 volumes:
   pgdata:

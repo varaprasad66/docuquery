@@ -7,6 +7,7 @@ policy call is a no-op.
 """
 
 import asyncio
+from pathlib import Path
 import sys
 
 if sys.platform == "win32":
@@ -15,4 +16,14 @@ if sys.platform == "win32":
 import uvicorn
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8100, reload=True)
+    backend_dir = Path(__file__).resolve().parent
+    # Only reload on actual Python code changes in app/, NEVER on uploaded PDFs
+    uvicorn.run(
+        "app.main:app",
+        host="127.0.0.1",
+        port=8100,
+        reload=True,
+        reload_dirs=[str(backend_dir / "app")],
+        reload_includes=["*.py"],
+        reload_excludes=["uploads/*", "sample_data/*", "*.pdf", "*.log"],
+    )

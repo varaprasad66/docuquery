@@ -5,14 +5,15 @@ import logging
 import time
 import uuid as uuidlib
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.dependencies import get_current_user_optional, rate_limit_chat
 from app.api.schemas import ChatRequest, Citation, ConversationOut, MessageOut
 from app.config import get_settings
-from app.db.models import Conversation, Message, QueryLog
+from app.db.models import Conversation, Message, QueryLog, User
 from app.db.session import get_db
 from app.services.llm import SYSTEM_PROMPT, llm_client
 from app.services.retrieval import Source, retrieve
@@ -40,8 +41,12 @@ async def _history(db: AsyncSession, conversation_id: uuidlib.UUID) -> list[Mess
     return list(reversed(result.scalars().all()))
 
 
-@router.post("/chat")
-async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
+@router.post("/chat", dependencies=[Depends(rate_limit_chat)])
+async def chat(
+    body: ChatRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_current_user_optional),
+):
     settings = get_settings()
     started = time.perf_counter()
 
@@ -49,9 +54,14 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
     if body.conversation_id:
         conversation = await db.get(Conversation, body.conversation_id)
         if conversation is None:
-            raise HTTPException(404, "Conversation not found.")
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found.")
+        if user and conversation.owner_id and conversation.owner_id != user.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied to this conversation.")
     else:
-        conversation = Conversation(title=body.question[:80])
+        conversation = Conversation(
+            title=body.question[:80],
+            owner_id=user.id if user else None,
+        )
         db.add(conversation)
         await db.flush()
 
@@ -167,8 +177,11 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/conversations", response_model=list[ConversationOut])
-async def list_conversations(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
+async def list_conversations(
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_current_user_optional),
+):
+    query = (
         select(
             Conversation,
             func.count(Message.id).label("message_count"),
@@ -177,6 +190,10 @@ async def list_conversations(db: AsyncSession = Depends(get_db)):
         .group_by(Conversation.id)
         .order_by(desc(Conversation.updated_at))
     )
+    if user:
+        query = query.where((Conversation.owner_id == user.id) | (Conversation.owner_id.is_(None)))
+
+    result = await db.execute(query)
     conversations = []
     for conversation, message_count in result.all():
         conversations.append(
@@ -191,10 +208,17 @@ async def list_conversations(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/conversations/{conversation_id}", response_model=list[MessageOut])
-async def get_conversation(conversation_id: uuidlib.UUID, db: AsyncSession = Depends(get_db)):
+async def get_conversation(
+    conversation_id: uuidlib.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_current_user_optional),
+):
     conversation = await db.get(Conversation, conversation_id)
     if conversation is None:
-        raise HTTPException(404, "Conversation not found.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found.")
+    if user and conversation.owner_id and conversation.owner_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied to this conversation.")
+
     result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)
@@ -203,10 +227,17 @@ async def get_conversation(conversation_id: uuidlib.UUID, db: AsyncSession = Dep
     return list(result.scalars().all())
 
 
-@router.delete("/conversations/{conversation_id}", status_code=204)
-async def delete_conversation(conversation_id: uuidlib.UUID, db: AsyncSession = Depends(get_db)):
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(
+    conversation_id: uuidlib.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_current_user_optional),
+):
     conversation = await db.get(Conversation, conversation_id)
     if conversation is None:
-        raise HTTPException(404, "Conversation not found.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found.")
+    if user and conversation.owner_id and conversation.owner_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied to this conversation.")
+
     await db.delete(conversation)
     await db.commit()

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { deleteDocument, fetchDocuments, uploadDocument } from "../api";
+import { deleteDocument, fetchDocuments, retryDocument, uploadDocument } from "../api";
 import type { DocRecord } from "../types";
 
 function formatSize(bytes: number): string {
@@ -8,27 +8,56 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function StatusBadge({ doc }: { doc: DocRecord }) {
-  if (doc.status === "ready")
+function StatusBadge({
+  doc,
+  onRetry,
+}: {
+  doc: DocRecord;
+  onRetry: (id: string) => void;
+}) {
+  if (doc.status === "ready") {
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Ready
       </span>
     );
-  if (doc.status === "failed")
+  }
+
+  if (doc.status === "failed") {
     return (
-      <span
-        title={doc.error ?? ""}
-        className="inline-flex items-center gap-1 text-xs font-medium text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full"
-      >
-        <span className="w-1.5 h-1.5 rounded-full bg-rose-500" /> Failed
-      </span>
+      <div className="flex items-center gap-2">
+        <span
+          title={doc.error ?? "Processing failed"}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-full cursor-help max-w-[200px] truncate"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+          Failed
+        </span>
+        <button
+          onClick={() => onRetry(doc.id)}
+          className="text-xs font-medium text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-0.5 rounded transition-colors"
+          title="Retry processing this document"
+        >
+          Retry
+        </button>
+      </div>
     );
+  }
+
+  // Processing with animated progress bar
+  const pct = Math.max(1, Math.round(doc.progress * 100));
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full">
-      <span className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-      {Math.round(doc.progress * 100)}%
-    </span>
+    <div className="flex items-center gap-2 min-w-[130px]">
+      <div className="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
+        <div
+          className="bg-indigo-600 h-full rounded-full transition-all duration-300 ease-out"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="text-xs font-semibold text-indigo-700 tabular-nums">
+        {pct}%
+      </span>
+    </div>
   );
 }
 
@@ -69,10 +98,20 @@ export default function DocumentsPage() {
         }
       }
       setUploading(false);
+      if (fileInput.current) fileInput.current.value = "";
       load();
     },
     [load],
   );
+
+  const handleRetry = async (id: string) => {
+    try {
+      await retryDocument(id);
+      load();
+    } catch (e) {
+      setError(`Retry failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
 
   const remove = async (id: string) => {
     try {
@@ -84,15 +123,17 @@ export default function DocumentsPage() {
   };
 
   const readyCount = docs.filter((d) => d.status === "ready").length;
+  const processingCount = docs.filter((d) => d.status === "processing").length;
   const totalChunks = docs.reduce((sum, d) => sum + d.chunk_count, 0);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className="flex items-end justify-between mb-4">
+      <div className="flex items-end justify-between mb-6">
         <div>
-          <h2 className="text-xl font-semibold">Documents</h2>
-          <p className="text-sm text-slate-500">
-            {docs.length} uploaded · {readyCount} ready · {totalChunks} chunks indexed
+          <h2 className="text-xl font-bold text-slate-900">Documents</h2>
+          <p className="text-sm text-slate-500 mt-0.5">
+            {docs.length} uploaded · {readyCount} ready
+            {processingCount > 0 ? ` · ${processingCount} processing` : ""} · {totalChunks} chunks indexed
           </p>
         </div>
       </div>
@@ -109,8 +150,10 @@ export default function DocumentsPage() {
           handleFiles(e.dataTransfer.files);
         }}
         onClick={() => fileInput.current?.click()}
-        className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors mb-6 ${
-          dragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 hover:border-indigo-300 hover:bg-slate-50"
+        className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all mb-6 ${
+          dragOver
+            ? "border-indigo-500 bg-indigo-50/50 scale-[1.005]"
+            : "border-slate-300 hover:border-indigo-400 hover:bg-slate-50/50"
         }`}
       >
         <input
@@ -122,54 +165,66 @@ export default function DocumentsPage() {
           onChange={(e) => handleFiles(e.target.files)}
         />
         {uploading ? (
-          <div className="flex flex-col items-center gap-2">
-            <span className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            <p className="text-sm text-slate-600">Uploading…</p>
+          <div className="flex flex-col items-center gap-2.5">
+            <span className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+            <p className="text-sm font-medium text-slate-700">Uploading file(s)...</p>
           </div>
         ) : (
-          <>
-            <p className="text-sm font-medium text-slate-700">
+          <div className="flex flex-col items-center gap-2">
+            <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 grid place-items-center mb-1">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+              </svg>
+            </div>
+            <p className="text-sm font-semibold text-slate-800">
               Drop PDFs here, or click to browse
             </p>
-            <p className="text-xs text-slate-400 mt-1">
-              Digital and scanned PDFs · processed with OCR + hybrid search indexing
+            <p className="text-xs text-slate-400">
+              Supports digital and scanned PDFs up to 50 MB · Ingestion with OCR and hybrid pgvector indexing
             </p>
-          </>
+          </div>
         )}
       </div>
 
       {error && (
-        <div className="mb-4 rounded-lg bg-rose-50 border border-rose-200 px-4 py-2 text-sm text-rose-700">
-          {error}
+        <div className="mb-4 rounded-lg bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700 flex items-center justify-between">
+          <span>{error}</span>
+          <button
+            onClick={() => setError(null)}
+            className="text-rose-500 hover:text-rose-700 font-bold ml-2"
+          >
+            ×
+          </button>
         </div>
       )}
 
-      <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100">
+      <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100 shadow-sm overflow-hidden">
         {docs.length === 0 && (
-          <p className="px-4 py-10 text-center text-sm text-slate-400">
-            No documents yet — upload your first PDF above.
-          </p>
+          <div className="px-4 py-12 text-center">
+            <p className="text-sm font-medium text-slate-500">No documents indexed yet.</p>
+            <p className="text-xs text-slate-400 mt-1">Upload a PDF above to begin chatting across your corpus.</p>
+          </div>
         )}
         {docs.map((doc) => (
-          <div key={doc.id} className="px-4 py-3 flex items-center gap-4">
-            <div className="w-9 h-9 rounded-lg bg-slate-100 grid place-items-center text-slate-500 text-xs font-bold">
+          <div key={doc.id} className="px-4 py-3.5 flex items-center gap-4 hover:bg-slate-50/50 transition-colors">
+            <div className="w-9 h-9 rounded-lg bg-indigo-50 text-indigo-700 grid place-items-center text-xs font-bold shrink-0">
               PDF
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium truncate">{doc.original_name}</p>
-              <p className="text-xs text-slate-500">
+              <p className="text-sm font-semibold text-slate-900 truncate">{doc.original_name}</p>
+              <p className="text-xs text-slate-500 mt-0.5">
                 {formatSize(doc.size_bytes)}
                 {doc.status === "ready" && ` · ${doc.page_count} pages · ${doc.chunk_count} chunks`}
-                {new Date(doc.created_at).toLocaleString()}
+                {" · "}{new Date(doc.created_at).toLocaleDateString()}
               </p>
             </div>
-            <StatusBadge doc={doc} />
+            <StatusBadge doc={doc} onRetry={handleRetry} />
             <button
               onClick={() => remove(doc.id)}
-              className="text-slate-400 hover:text-rose-600 transition-colors p-1"
+              className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 rounded-md hover:bg-rose-50 shrink-0"
               title="Delete document"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M3 6h18M8 6V4h8v2m-9 0v14a2 2 0 002 2h6a2 2 0 002-2V6" />
               </svg>
             </button>
