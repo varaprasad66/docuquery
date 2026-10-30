@@ -13,8 +13,8 @@ One codebase, three sellable editions selected via `EDITION` in the backend `.en
 | Edition | Adds beyond the previous tier |
 |---|---|
 | `basic` (Starter) | Core RAG: PDF/OCR ingestion, hybrid chat + citations, conversations, accounts, tenant isolation |
-| `professional` (Professional) | Usage & cost analytics + daily series, semantic answer cache (cost optimization), quotas, answer feedback, search filters |
-| `enterprise` (Enterprise) | Admin console API, audit trail, full auth lifecycle (refresh rotation, revocation, lockout), 108-test regression rig |
+| `professional` (Professional) | Structured extraction (`POST /api/extract` with invoice & contract templates + async jobs), usage & cost analytics, semantic answer cache, quotas, answer feedback, search filters |
+| `enterprise` (Enterprise) | Admin console API, audit trail, full auth lifecycle (refresh rotation, revocation, lockout), regression rig |
 
 Security fundamentals (tenant isolation, rate limiting, sanitized errors, security
 headers) are enabled in **every** edition.
@@ -31,6 +31,7 @@ headers) are enabled in **every** edition.
 | [Testing & Quality Strategy](docs/TESTING_STRATEGY.md) | Clients | 108-test rig, quality gates, benchmark methodology |
 | [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) | Internal | Phased roadmap: features, edge cases, security, tests per phase |
 | [Commercialization](docs/COMMERCIALIZATION.md) | Internal | How to package, price, and deliver the three editions |
+| [Integrations](docs/INTEGRATIONS.md) | Both | API keys, webhooks, n8n/Make recipes |
 | [Docs Index](docs/README.md) | Both | Full documentation set |
 
 ---
@@ -109,7 +110,7 @@ flowchart TD
 - **Backend Service**: FastAPI, SQLAlchemy 2 (async + sync), Alembic migrations, Celery, Redis
 - **Document Processing**: PyMuPDF (`fitz`), Pillow, Tesseract OCR (`pytesseract`), python-docx, python-pptx, openpyxl, BeautifulSoup4
 - **Frontend SPA**: React 19, TypeScript, Vite, Tailwind CSS v4
-- **Testing**: Python test suite — 84 unit tests + 59 integration tests against a real disposable PostgreSQL database, including a dedicated tenant-isolation regression suite
+- **Testing**: Python test suite — 135 unit tests + 92 integration tests against a real disposable PostgreSQL database, plus a Playwright e2e smoke test (login → upload → chat)
 
 ---
 
@@ -166,17 +167,20 @@ npm run dev
 
 DocuQuery includes an automated evaluation harness testing retrieval accuracy and faithfulness against a golden ground-truth dataset spanning contracts, technical papers, and invoices.
 
-To execute the eval harness:
+To execute the eval harness (126 golden cases over the seeded corpus; exits non-zero when hit@6 falls below the `EVAL_MIN_HIT6` gate):
 
 ```bash
+python scripts/seed_corpus.py      # (re)generate and index the sample corpus
 python scripts/run_eval.py 6
 ```
+
+Set `EVAL_JUDGE_ENABLED=True` for the optional LLM-judge pass (answer faithfulness, answer relevance, refusal correctness on unanswerable questions).
 
 ### Golden Set Results (Top-6 RRF Hybrid Search)
 
 ```
 =======================================================
-DocuQuery RAG Evaluation (20 Golden Q&A Pairs)
+DocuQuery RAG Evaluation (126 Golden Q&A Pairs)
 =======================================================
 [HIT] eval-01 | Top-1: Y | Top-3: Y | Top-6: Y | 12ms | Primary thesis on AI agents & human creativity...
 [HIT] eval-02 | Top-1: Y | Top-3: Y | Top-6: Y | 8ms  | Novelty & value metrics for agent artifacts...
@@ -186,11 +190,12 @@ DocuQuery RAG Evaluation (20 Golden Q&A Pairs)
 -------------------------------------------------------
 EVALUATION SUMMARY
 -------------------------------------------------------
-Total Test Cases:    20
-Hit Rate @ Top-1:    85.0%
-Hit Rate @ Top-3:    95.0%
-Hit Rate @ Top-6:    100.0%
-Avg Retrieval Time:  8.4 ms
+Total Test Cases:    126 (116 answerable, 10 unanswerable)
+Hit Rate @ Top-1:    74.1%
+Hit Rate @ Top-3:    87.1%
+Hit Rate @ Top-6:    96.6%
+Citation Accuracy:   86.7%
+Avg Retrieval Time:  338.8 ms
 -------------------------------------------------------
 ```
 
@@ -198,7 +203,7 @@ Avg Retrieval Time:  8.4 ms
 
 ## Running Automated Tests
 
-Two-phase runner (unit tests + integration tests against a disposable `docuquery_test` database):
+Two-phase runner (unit tests + integration tests against a disposable `docuquery_test` database). CI mirrors this in `.github/workflows/ci.yml` (ruff, tests on a Postgres+pgvector service, bandit + pip-audit, frontend lint/build, eval gate); `e2e.yml` runs the Playwright smoke test on demand:
 
 ```bash
 python scripts/run_tests.py          # both phases
@@ -206,6 +211,10 @@ python scripts/run_tests.py unit     # unit only (no database needed)
 ```
 
 Verified test coverage includes:
+- **Retrieval quality** — follow-up question rewriter (history-aware standalone queries), optional local cross-encoder reranker (`RERANKER_ENABLED`, falls back to RRF order), document-filter-scoped semantic cache.
+- **Structured extraction** — schema-validated LLM extraction with one retry, per-field source citations, confidence flag, async job mode with status endpoint (professional edition).
+- **Integrations** — scoped API keys (`dq_...`, shown once, 401 on revocation), HMAC-SHA256-signed webhooks with retries, delivery log, SSRF-verified targets (see [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)).
+- **Security hardening** — 30-minute access tokens, HttpOnly refresh cookie with CSRF guard, optional ClamAV upload scanning with quarantine, prompt-injection delimiters + system rule, strengthened production boot guards (CORS wildcard, weak DB password, HTTPS).
 - **Multi-format ingestion** — DOCX/PPTX/XLSX/HTML/TXT/MD parsing with location citations (slide/sheet rows/section), magic-byte and zip-structure validation, extension masquerading rejection, zip-bomb guards (entry count + uncompressed size), and SSRF-protected URL import (private/loopback/link-local targets, embedded credentials, redirect re-validation, content-type allow-list, size cap).
 - **Tenant isolation regression suite** — user A's private documents can never surface in user B's or a guest's search results, chat citations, document listings, stats, or conversations (14 dedicated tests).
 - **Access-control matrix** — guest/user/owner/admin × read/mutate across all document visibilities.

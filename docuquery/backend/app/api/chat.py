@@ -19,6 +19,7 @@ from app.api.dependencies import (
     client_identity,
     get_current_user_optional_dep,
     rate_limit_chat,
+    require_api_key_scope,
 )
 from app.api.schemas import (
     ChatRequest,
@@ -31,7 +32,7 @@ from app.config import get_settings
 from app.db.models import Conversation, Message, QueryLog, User
 from app.db.session import get_db
 from app.editions import require_professional
-from app.services import semantic_cache
+from app.services import query_rewriter, semantic_cache
 from app.services.costs import calculate_cost_usd
 from app.services.llm import SYSTEM_PROMPT, llm_client
 from app.services.retrieval import Source, retrieve
@@ -44,10 +45,17 @@ SANITIZED_STREAM_ERROR = "The assistant is temporarily unavailable. Please try a
 
 
 def _build_context(sources: list[Source]) -> str:
+    """Excerpts are untrusted document data: they are wrapped in explicit
+    delimiters so prompt-injection text inside documents stays data."""
     parts = []
     for i, s in enumerate(sources, start=1):
         parts.append(f"[{i}] ({s.document_name}, {s.source_label})\n{s.content}")
-    return "\n\n".join(parts)
+    body = "\n\n".join(parts)
+    return (
+        "<untrusted_document_context>\n"
+        f"{body}\n"
+        "</untrusted_document_context>"
+    )
 
 
 async def _history(db: AsyncSession, conversation_id: uuidlib.UUID) -> list[Message]:
@@ -83,7 +91,7 @@ def _sse(event: dict) -> str:
     return f"data: {json.dumps(event, default=str)}\n\n"
 
 
-@router.post("/chat", dependencies=[Depends(rate_limit_chat)])
+@router.post("/chat", dependencies=[Depends(rate_limit_chat), Depends(require_api_key_scope("chat"))])
 async def chat(
     body: ChatRequest,
     request: Request,
@@ -131,15 +139,21 @@ async def chat(
         llm_ms = 0
 
         try:
+            # --- Follow-up rewriter: make the latest question self-contained ---
+            # With no history this is a no-op returning the original question.
+            history = await _history(db, conversation_id)
+            search_query = await query_rewriter.rewrite_question(body.question, history)
+
             # --- Semantic cache (professional): answer repeated questions cheaply ---
             if settings.cache_enabled:
                 try:
                     from app.services.embeddings import embed_texts
 
-                    qvec = (await embed_texts([body.question]))[0]
+                    qvec = (await embed_texts([search_query]))[0]
                     qvec_literal = "[" + ",".join(f"{x:.7g}" for x in qvec) + "]"
                     hit = await semantic_cache.lookup(
-                        db, owner_id, qvec_literal, body.question
+                        db, owner_id, qvec_literal, search_query,
+                        document_ids=[str(d) for d in body.document_ids] if body.document_ids else None,
                     )
                     if hit:
                         retrieval_ms = round((time.perf_counter() - started) * 1000)
@@ -180,10 +194,10 @@ async def chat(
                 except Exception:
                     logger.warning("Cache path failed; answering normally", exc_info=True)
 
-            # --- Retrieval (tenant-scoped) ---
+            # --- Retrieval (tenant-scoped, uses the standalone query) ---
             sources, methods = await retrieve(
                 db,
-                body.question,
+                search_query,
                 top_k=body.top_k,
                 owner_id=owner_id,
                 document_ids=body.document_ids,
@@ -212,7 +226,6 @@ async def chat(
             ]
             yield _sse({"type": "citations", "citations": citations})
 
-            history = await _history(db, conversation_id)
             messages = [{"role": "system", "content": SYSTEM_PROMPT}]
             for msg in history[:-1]:  # exclude the just-asked question; it goes last with context
                 messages.append({"role": msg.role, "content": msg.content[:2000]})
@@ -288,11 +301,14 @@ async def chat(
             # --- Cache the fresh answer (professional) ---
             if settings.cache_enabled and sources:
                 try:
-                    qvec = (await embed_texts([body.question]))[0]
+                    from app.services.embeddings import embed_texts
+
+                    qvec = (await embed_texts([search_query]))[0]
                     qvec_literal = "[" + ",".join(f"{x:.7g}" for x in qvec) + "]"
                     await semantic_cache.store(
-                        db, owner_id, body.question, qvec_literal, answer, citations,
+                        db, owner_id, search_query, qvec_literal, answer, citations,
                         methods, prompt_tokens, completion_tokens,
+                        document_ids=[str(d) for d in body.document_ids] if body.document_ids else None,
                     )
                 except Exception:
                     logger.warning("Cache store failed", exc_info=True)
@@ -318,7 +334,7 @@ async def chat(
     )
 
 
-@router.get("/conversations", response_model=list[ConversationOut])
+@router.get("/conversations", response_model=list[ConversationOut], dependencies=[Depends(require_api_key_scope("read"))])
 async def list_conversations(
     db: AsyncSession = Depends(get_db),
     user: User | None = Depends(get_current_user_optional_dep),

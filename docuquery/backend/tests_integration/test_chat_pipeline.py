@@ -1,6 +1,7 @@
 """Chat pipeline: SSE streaming, citations, semantic cache (cost optimization),
 quotas, feedback loop, and sanitized errors."""
 
+import types
 import uuid
 
 from tests_integration import IntegrationTestCase
@@ -157,3 +158,102 @@ class TestChatPipeline(IntegrationTestCase):
             )
         self.assertNotIn("SECRET-INTERNAL-DETAILS", r.text, "Internal error details must never reach the client")
         self.assertIn("temporarily unavailable", r.text)
+
+
+class TestCacheDocumentFilterScope(IntegrationTestCase):
+    """The semantic cache key must include the document filter: the same
+    question asked with different document_ids must never share a cache entry."""
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.email = f"scope-{uuid.uuid4().hex[:8]}@test.io"
+        self.user = await self.register(self.email)
+        self.token = self.user["access_token"]
+        self.doc_a = await self.upload_pdf(
+            self.token, filename="alpha.pdf", text="Alpha document unique marker zqalpha with leave policy."
+        )
+        self.doc_b = await self.upload_pdf(
+            self.token, filename="beta.pdf", text="Beta document unique marker zqbeta with expense policy."
+        )
+        await self.process_document(self.doc_a["id"])
+        await self.process_document(self.doc_b["id"])
+
+    async def _chat(self, **kwargs) -> list[dict]:
+        return await self.chat_sse("What policies do these documents contain?", token=self.token, **kwargs)
+
+    async def test_same_filter_repeats_hit_cache(self):
+        filter_a = {"document_ids": [self.doc_a["id"]]}
+        e1 = await self._chat(**filter_a)
+        e2 = await self._chat(**filter_a)
+        self.assertFalse(next(e for e in e1 if e["type"] == "meta")["cached"])
+        self.assertTrue(next(e for e in e2 if e["type"] == "meta")["cached"])
+
+    async def test_different_filter_never_hits_cache(self):
+        e1 = await self._chat(document_ids=[self.doc_a["id"]])
+        self.assertFalse(next(e for e in e1 if e["type"] == "meta")["cached"])
+
+        e2 = await self._chat(document_ids=[self.doc_b["id"]])
+        self.assertFalse(next(e for e in e2 if e["type"] == "meta")["cached"])
+
+    async def test_unfiltered_never_hits_filtered_cache(self):
+        e1 = await self._chat(document_ids=[self.doc_a["id"]])
+        e2 = await self._chat()
+        self.assertFalse(next(e for e in e1 if e["type"] == "meta")["cached"])
+        self.assertFalse(next(e for e in e2 if e["type"] == "meta")["cached"])
+
+
+class TestFollowUpRewriter(IntegrationTestCase):
+    """With history, the follow-up is rewritten into a standalone query before
+    retrieval (LLM patched); with no history the original question is used."""
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        from unittest.mock import patch
+
+        import app.services.query_rewriter as qr
+
+        self.email = f"rw-{uuid.uuid4().hex[:8]}@test.io"
+        self.user = await self.register(self.email)
+        self.token = self.user["access_token"]
+        self.doc = await self.upload_pdf(
+            self.token, filename="handbook.pdf",
+            text="Remote work policy: employees may work remotely three days per week marker zqremote.",
+        )
+        await self.process_document(self.doc["id"])
+
+        class _Completions:
+            async def create(self, **kwargs):
+                prompt = kwargs["messages"][-1]["content"]
+                assert "LATEST QUESTION" in prompt, prompt
+                return types.SimpleNamespace(
+                    choices=[
+                        types.SimpleNamespace(
+                            message=types.SimpleNamespace(
+                                content="handbook remote work policy zqremote"
+                            )
+                        )
+                    ]
+                )
+
+        class _Client:
+            chat = types.SimpleNamespace(completions=_Completions())
+
+        self._patcher = patch.object(qr, "llm_client", return_value=_Client())
+        self._patcher.start()
+        self.addAsyncCleanup(self._patcher.stop)
+
+    async def test_followup_reaches_retrieval_as_standalone_query(self):
+        e1 = await self.chat_sse("Summarize the employee handbook", token=self.token)
+        conv_id = next(e for e in e1 if e["type"] == "meta")["conversation_id"]
+
+        e2 = await self.chat_sse("what about remote work?", token=self.token, conversation_id=conv_id)
+        citations = next(e for e in e2 if e["type"] == "citations")["citations"]
+        self.assertTrue(citations)
+        self.assertEqual(citations[0]["document_name"], "handbook.pdf")
+
+    async def test_first_question_skips_rewriter(self):
+        from app.services import query_rewriter as qr
+
+        self.assertFalse(qr.needs_rewrite([]))
+        events = await self.chat_sse("How many annual leave days do I get?", token=self.token)
+        self.assertIn("citations", [e["type"] for e in events])

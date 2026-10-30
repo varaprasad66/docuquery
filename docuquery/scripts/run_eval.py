@@ -17,6 +17,12 @@ if sys.platform == "win32":
 from app.evals.eval_runner import run_evaluation
 
 if __name__ == "__main__":
+    from app.config import get_settings
+    from app.evals.eval_runner import run_judged_evaluation
+
     top_k = int(sys.argv[1]) if len(sys.argv) > 1 else 6
     summary = asyncio.run(run_evaluation(top_k=top_k))
-    sys.exit(0 if summary.get("hit_rate_top6_pct", 0) > 0 else 1)
+    if get_settings().eval_judge_enabled:
+        asyncio.run(run_judged_evaluation(top_k=top_k))
+    # Eval gate: fail when hit@6 drops below the configured threshold.
+    sys.exit(0 if summary.get("gate_passed", False) else 1)

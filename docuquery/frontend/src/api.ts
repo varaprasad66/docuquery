@@ -2,6 +2,8 @@ import type {
   ChatMessage,
   ConversationSummary,
   DocRecord,
+  ExtractJob,
+  ExtractResult,
   StatsOverview,
   StreamEvent,
   TokenResponse,
@@ -99,6 +101,35 @@ export async function importDocumentFromUrl(url: string): Promise<DocRecord> {
   );
 }
 
+// --- Extraction ---
+export async function fetchExtractionTemplates(): Promise<Record<string, { description: string; schema: Record<string, unknown> }>> {
+  return json(await safeFetch(`${BASE}/extract/templates`, { headers: authHeaders() }));
+}
+
+export async function runExtraction(documentIds: string[], template: string): Promise<ExtractResult> {
+  return json(
+    await safeFetch(`${BASE}/extract`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ document_ids: documentIds, template }),
+    }),
+  );
+}
+
+export async function createExtractionJob(documentIds: string[], template: string): Promise<ExtractJob> {
+  return json(
+    await safeFetch(`${BASE}/extract/jobs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ document_ids: documentIds, template, async_mode: true }),
+    }),
+  );
+}
+
+export async function fetchExtractionJob(jobId: string): Promise<ExtractJob> {
+  return json(await safeFetch(`${BASE}/extract/jobs/${jobId}`, { headers: authHeaders() }));
+}
+
 export async function deleteDocument(id: string): Promise<void> {
   const res = await safeFetch(`${BASE}/documents/${id}`, {
     method: "DELETE",
@@ -164,6 +195,25 @@ export async function fetchMe(): Promise<User | null> {
     );
   } catch {
     clearStoredToken();
+    return null;
+  }
+}
+
+// Session refresh: the refresh token lives in an HttpOnly cookie, so this call
+// carries credentials and the CSRF-guard header. Returns null when the session
+// cannot be extended (user must sign in again).
+export async function refreshSession(): Promise<TokenResponse | null> {
+  try {
+    const res = await safeFetch(`${BASE}/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as TokenResponse;
+    if (data.access_token) setStoredToken(data.access_token);
+    return data;
+  } catch {
     return null;
   }
 }

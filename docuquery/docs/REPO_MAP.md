@@ -40,9 +40,9 @@ markdown) and `.zcode/` (agent tool config, untracked). Neither contains product
 | Concern | Location | Notes |
 |---|---|---|
 | API routers | `app/api/` | `health.py`, `auth.py`, `documents.py` (multi-format upload + `POST /api/documents/url` SSRF-guarded import), `search.py`, `chat.py` (SSE), `stats.py`, `admin.py`; shared request/response models in `schemas.py`; shared guards in `dependencies.py` |
-| Services | `app/services/` | `parsers.py` (multi-format registry + magic/zip validation + zip-bomb guard), `pdf.py` (PDF parser + OCR), `url_fetch.py` (SSRF-guarded URL fetcher), `chunker.py`, `embeddings.py`, `retrieval.py` (hybrid + RRF), `llm.py` (OpenAI-compatible client), `auth.py` (JWT/refresh/lockout), `audit.py`, `costs.py`, `rate_limit.py`, `security.py`, `semantic_cache.py`, `token_store.py` |
+| Services | `app/services/` | `parsers.py` (multi-format registry), `pdf.py` (PDF + OCR), `url_fetch.py` (SSRF-guarded fetcher), `query_rewriter.py` (follow-up rewriter), `reranker.py` (optional cross-encoder), `extraction.py` (schema-validated extraction + templates), `api_keys.py`, `webhooks.py` (HMAC-signed delivery), `scan.py` (ClamAV), `chunker.py`, `embeddings.py`, `retrieval.py` (hybrid + RRF), `llm.py`, `auth.py`, `audit.py`, `costs.py`, `rate_limit.py`, `security.py`, `semantic_cache.py`, `token_store.py` |
 | DB models | `app/db/models.py` | SQLAlchemy 2 models; engine/session in `app/db/session.py` |
-| Migrations | `backend/migrations/versions/` | `0001_initial.py`, `0002_tenant_security_analytics.py`, `0003_multiformat_location.py` (chunk location + document source_url); Alembic via `backend/alembic.ini` |
+| Migrations | `backend/migrations/versions/` | `0001_initial`, `0002_tenant_security_analytics`, `0003_multiformat_location` (chunk location + source_url), `0004_extraction_jobs`, `0005_api_keys_webhooks`; Alembic via `backend/alembic.ini` |
 | Worker / Celery | `app/workers/` | `celery_app.py`, `tasks.py` (ingestion pipeline); `USE_CELERY=False` falls back to in-process BackgroundTasks |
 | Parser / OCR | `app/services/pdf.py` + `app/services/parsers.py` | PyMuPDF text layer, Tesseract OCR fallback at `OCR_DPI`; the registry in `parsers.py` maps extensions to parsers (PDF, DOCX, PPTX, XLSX, HTML, TXT, MD) and validates content by magic bytes / zip structure, with zip-bomb caps |
 | Chunker | `app/services/chunker.py` | Heading/paragraph chunks, `CHUNK_SIZE`/`CHUNK_OVERLAP` |
@@ -51,10 +51,10 @@ markdown) and `.zcode/` (agent tool config, untracked). Neither contains product
 | Embeddings | `app/services/embeddings.py` | OpenAI-compatible; `EMBED_DIM` must match model |
 | Config | `app/config.py` | **Single source of truth** — pydantic-settings `Settings`, `get_settings()` (lru_cache), reads `backend/.env`; production boot guards in `_validate_production` |
 | Editions | `app/editions.py` | `EDITION` env gates features: basic / professional / enterprise |
-| Eval harness | `app/evals/` | `eval_runner.py` + `golden_dataset.json` (20 golden Q&A pairs) |
+| Eval harness | `app/evals/` | `eval_runner.py` (hit rates, citation accuracy, optional LLM-judge) + `golden_dataset.json` (126 cases incl. unanswerable) |
 | App assembly | `app/main.py` | `create_app()`, middleware (request-id, security headers, error sanitizing, CORS), version 0.3.0 |
 | Auth | `app/api/auth.py` + `app/services/auth.py` + `app/services/token_store.py` | JWT access tokens, refresh rotation with replay detection, lockout |
-| Tests | `backend/tests/` (unit), `backend/tests_integration/` (integration) | 84 unit + 59 integration = 143 tests |
+| Tests | `backend/tests/` (unit), `backend/tests_integration/` (integration), `frontend/e2e/` (Playwright smoke) | 135 unit + 92 integration = 227 tests |
 
 ## How to run
 

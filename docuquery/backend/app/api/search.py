@@ -3,7 +3,7 @@ import time
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_current_user_optional_dep, rate_limit_search
+from app.api.dependencies import get_current_user_optional_dep, rate_limit_search, require_api_key_scope
 from app.api.schemas import SearchRequest, SearchResponse, SearchResult
 from app.db.models import User
 from app.db.session import get_db
@@ -12,7 +12,7 @@ from app.services.retrieval import retrieve
 router = APIRouter(prefix="/api/search", tags=["search"])
 
 
-@router.post("", response_model=SearchResponse, dependencies=[Depends(rate_limit_search)])
+@router.post("", response_model=SearchResponse, dependencies=[Depends(rate_limit_search), Depends(require_api_key_scope("read"))])
 async def search(
     body: SearchRequest,
     db: AsyncSession = Depends(get_db),

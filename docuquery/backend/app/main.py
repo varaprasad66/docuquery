@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.api import admin, auth, chat, documents, health, search, stats
+from app.api import admin, auth, chat, documents, extract, health, keys, search, stats, webhooks
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -76,6 +76,9 @@ def create_app() -> FastAPI:
     app.include_router(chat.router)
     app.include_router(stats.router)
     app.include_router(admin.router)  # self-gates on admin role + enterprise edition
+    app.include_router(extract.router)  # self-gates on professional edition
+    app.include_router(keys.router)  # JWT-only: API keys cannot manage keys
+    app.include_router(webhooks.router)  # JWT-only subscription management
     return app
 
 

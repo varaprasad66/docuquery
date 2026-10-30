@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import case, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_current_user_optional_dep
+from app.api.dependencies import get_current_user_optional_dep, require_api_key_scope
 from app.api.schemas import (
     CacheStats,
     DailyUsagePoint,
@@ -27,7 +27,7 @@ from app.db.session import get_db
 from app.services.security import is_admin
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/stats", tags=["stats"])
+router = APIRouter(prefix="/api/stats", tags=["stats"], dependencies=[Depends(require_api_key_scope("read"))])
 
 DAILY_SERIES_DAYS = 14
 

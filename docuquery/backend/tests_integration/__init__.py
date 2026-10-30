@@ -283,6 +283,10 @@ class IntegrationTestCase(unittest.IsolatedAsyncioTestCase):
         # Clean slate per test (order matters for FKs).
         async with engine.begin() as conn:
             for table in (
+                "webhook_deliveries",
+                "webhooks",
+                "api_keys",
+                "extraction_jobs",
                 "semantic_cache",
                 "audit_logs",
                 "refresh_tokens",

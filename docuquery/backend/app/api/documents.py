@@ -13,6 +13,7 @@ from app.api.dependencies import (
     client_identity,
     get_current_user_optional_dep,
     rate_limit_upload,
+    require_api_key_scope,
 )
 from app.api.schemas import DocumentDetail, DocumentOut, UrlImportRequest, VisibilityUpdate
 from app.config import get_settings
@@ -27,6 +28,7 @@ from app.services.parsers import (
     validate_content_kind,
 )
 from app.services.security import ensure_document_mutate, ensure_document_read
+from app.services.scan import scan_bytes
 from app.services.url_fetch import UrlImportError, assert_public_url, fetch_document, suggest_name
 from app.workers.tasks import process_document, process_document_core
 
@@ -81,7 +83,7 @@ def _dispatch_processing(document_id: str, background_tasks: BackgroundTasks) ->
     logger.info("Dispatched document %s to FastAPI BackgroundTasks", document_id)
 
 
-@router.post("", response_model=DocumentOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit_upload)])
+@router.post("", response_model=DocumentOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit_upload), Depends(require_api_key_scope("upload"))])
 async def upload_document(
     file: UploadFile,
     request: Request,
@@ -119,6 +121,28 @@ async def upload_document(
         validate_content_kind(contents, ext)
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+
+    # Optional malware scan (ClamAV). Infected files are quarantined on disk
+    # for forensics, never ingested.
+    clean, threat = scan_bytes(contents)
+    if not clean:
+        quarantine_dir = settings.upload_dir / "quarantine"
+        try:
+            quarantine_dir.mkdir(parents=True, exist_ok=True)
+            (quarantine_dir / f"{uuidlib.uuid4().hex}.bin").write_bytes(contents)
+        except Exception:
+            logger.warning("Failed to persist quarantined upload", exc_info=True)
+        ip, ua = await client_identity(request)
+        await record_audit(
+            db, "doc.quarantined", actor_id=user.id if user else None, resource_type="document",
+            resource_id=None, ip=ip, user_agent=ua,
+            detail={"threat": threat, "name": file.filename[:256]},
+        )
+        await db.commit()
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "File failed the malware scan and was not accepted.",
+        )
 
     # Upload quota (professional edition setting; 0 = unlimited).
     if user and settings.max_uploads_per_day > 0:
@@ -169,7 +193,7 @@ async def upload_document(
     return doc
 
 
-@router.post("/url", response_model=DocumentOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit_upload)])
+@router.post("/url", response_model=DocumentOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit_upload), Depends(require_api_key_scope("upload"))])
 async def import_document_from_url(
     body: UrlImportRequest,
     request: Request,
@@ -253,7 +277,7 @@ async def import_document_from_url(
     return doc
 
 
-@router.get("", response_model=list[DocumentOut])
+@router.get("", response_model=list[DocumentOut], dependencies=[Depends(require_api_key_scope("read"))])
 async def list_documents(
     db: AsyncSession = Depends(get_db),
     user: User | None = Depends(get_current_user_optional_dep),
@@ -273,7 +297,7 @@ async def list_documents(
     return list(result.scalars().all())
 
 
-@router.get("/{document_id}", response_model=DocumentDetail)
+@router.get("/{document_id}", response_model=DocumentDetail, dependencies=[Depends(require_api_key_scope("read"))])
 async def get_document(
     document_id: uuidlib.UUID,
     db: AsyncSession = Depends(get_db),

@@ -1,162 +1,1010 @@
 [
   {
-    "id": "eval-01",
-    "question": "What is the primary thesis regarding AI agents and human creativity?",
-    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
-    "expected_page": 1,
-    "ground_truth": "AI agents exhibit assistive and divergent creative capabilities, collaborating with human operators rather than completely replacing autonomous human creative intent.",
-    "category": "conceptual"
-  },
-  {
-    "id": "eval-02",
-    "question": "What metrics are proposed to evaluate the novelty and value of agent-generated artifacts?",
-    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
-    "expected_page": 3,
-    "ground_truth": "Boden's creativity criteria including novelty (P-creativity and H-creativity), value, and surprise, augmented by domain-specific human judges and semantic distance metrics.",
-    "category": "technical"
-  },
-  {
-    "id": "eval-03",
-    "question": "How does the paper differentiate exploratory creativity from transformational creativity?",
-    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
-    "expected_page": 5,
-    "ground_truth": "Exploratory creativity traverses defined conceptual spaces within established rules, whereas transformational creativity alters the underlying rules or dimensions of the conceptual space.",
-    "category": "conceptual"
-  },
-  {
-    "id": "eval-04",
-    "question": "What role does memory or cognitive architecture play in agentic creative workflows?",
-    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
-    "expected_page": 7,
-    "ground_truth": "Episodic and associative memory structures allow agents to retrieve analogies and cross-domain concepts to synthesize novel solutions.",
-    "category": "architecture"
-  },
-  {
-    "id": "eval-05",
-    "question": "What are the limitations of pure LLM generation without interactive feedback loops?",
-    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
-    "expected_page": 11,
-    "ground_truth": "Feedforward token generation lacks self-critique, convergence toward defined aesthetic criteria, and iterative refinement mechanisms.",
-    "category": "technical"
-  },
-  {
-    "id": "eval-06",
-    "question": "How does multi-agent debate influence the creative diversity of candidate outputs?",
-    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
-    "expected_page": 14,
-    "ground_truth": "Multi-agent debate introduces divergent perspectives and dialectic tension that prevents premature mode collapse in ideation.",
-    "category": "architecture"
-  },
-  {
-    "id": "eval-07",
-    "question": "What ethical considerations or attribution challenges are raised in the paper?",
-    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
-    "expected_page": 20,
-    "ground_truth": "Attribution of provenance, copyright boundaries of pre-training corpora, and dilution of human authorship credits.",
-    "category": "ethics"
-  },
-  {
-    "id": "eval-08",
-    "question": "What is the annual paid time off (PTO) accrual policy in the employee handbook?",
+    "id": "eval-001",
+    "question": "What are the core collaboration hours for full-time employees?",
     "expected_doc": "employee_handbook_2026.pdf",
     "expected_page": 1,
-    "ground_truth": "Full-time employees accrue 20 days of paid time off per calendar year, escalating to 25 days after 3 years of service.",
+    "ground_truth": "core collaboration hours between 10:00 AM and 3:00 PM in their respective local time zones",
     "category": "policy"
   },
   {
-    "id": "eval-09",
-    "question": "What is the maximum rollover of unused vacation days into the next year?",
+    "id": "eval-002",
+    "question": "How many PTO days do employees accrue per year in their first three years of service?",
     "expected_doc": "employee_handbook_2026.pdf",
     "expected_page": 1,
-    "ground_truth": "Up to 5 unused PTO days may roll over into the following calendar year, expiring on March 31st.",
+    "ground_truth": "20 days of paid time off per calendar year for the first 3 years of service",
     "category": "policy"
   },
   {
-    "id": "eval-10",
-    "question": "What is the core working hours requirement for remote and hybrid employees?",
+    "id": "eval-003",
+    "question": "How does the PTO accrual change beginning in year four?",
     "expected_doc": "employee_handbook_2026.pdf",
     "expected_page": 1,
-    "ground_truth": "Core collaboration hours are 10:00 AM to 3:00 PM in the employee's local time zone.",
+    "ground_truth": "Beginning year 4, annual accrual increases to 25 days",
     "category": "policy"
   },
   {
-    "id": "eval-11",
-    "question": "What is the annual health and wellness equipment reimbursement stipend?",
+    "id": "eval-004",
+    "question": "How many unused PTO days may roll over into the next calendar year?",
     "expected_doc": "employee_handbook_2026.pdf",
     "expected_page": 1,
-    "ground_truth": "An annual home office and wellness stipend of up to $1,200 is reimbursed per employee.",
-    "category": "finance"
+    "ground_truth": "Up to 5 unused PTO days may roll over into the subsequent calendar year",
+    "category": "policy"
   },
   {
-    "id": "eval-12",
-    "question": "What is the procedure for reporting a security incident or suspected data breach?",
+    "id": "eval-005",
+    "question": "When do rolled-over PTO days expire?",
     "expected_doc": "employee_handbook_2026.pdf",
     "expected_page": 1,
-    "ground_truth": "Immediately report to security@company.internal or page the on-call security officer within 1 hour.",
+    "ground_truth": "expiring on March 31st if unspent",
+    "category": "policy"
+  },
+  {
+    "id": "eval-006",
+    "question": "How many weeks of fully paid parental leave do primary caregivers receive?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "Primary caregivers receive 16 weeks of fully paid parental leave",
+    "category": "policy"
+  },
+  {
+    "id": "eval-007",
+    "question": "What is the parental leave entitlement for secondary caregivers?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "secondary caregivers receive 8 weeks",
+    "category": "policy"
+  },
+  {
+    "id": "eval-008",
+    "question": "What retirement savings program does Acme offer?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "a 401(k) retirement savings program with an immediate 100% company match on the first 4% of eligible employee salary contributions",
+    "category": "policy"
+  },
+  {
+    "id": "eval-009",
+    "question": "When does vesting begin for the 401(k) program?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "Vesting is immediate upon initial enrollment",
+    "category": "policy"
+  },
+  {
+    "id": "eval-010",
+    "question": "What is the maximum annual home office and wellness stipend?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "an annual home office and wellness stipend of up to $1,200",
+    "category": "policy"
+  },
+  {
+    "id": "eval-011",
+    "question": "What device encryption is required for company devices?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "full-disk encryption (BitLocker or FileVault)",
     "category": "security"
   },
   {
-    "id": "eval-13",
-    "question": "What is the total amount due on invoice #INV-2026-089?",
-    "expected_doc": "acme_invoice_scanned.pdf",
-    "expected_page": 1,
-    "ground_truth": "$14,850.00 USD",
-    "category": "finance"
-  },
-  {
-    "id": "eval-14",
-    "question": "What are the payment terms specified on the Acme invoice?",
-    "expected_doc": "acme_invoice_scanned.pdf",
-    "expected_page": 1,
-    "ground_truth": "Net 30 days from invoice date via ACH or wire transfer.",
-    "category": "finance"
-  },
-  {
-    "id": "eval-15",
-    "question": "What line items and quantities are billed on the Acme invoice?",
-    "expected_doc": "acme_invoice_scanned.pdf",
-    "expected_page": 1,
-    "ground_truth": "Cloud Infrastructure Migration (120 hours @ $95/hr) and Enterprise Security Audit (35 hours @ $100/hr).",
-    "category": "finance"
-  },
-  {
-    "id": "eval-16",
-    "question": "Who is the billing contact and address for Acme Corp on the invoice?",
-    "expected_doc": "acme_invoice_scanned.pdf",
-    "expected_page": 1,
-    "ground_truth": "Acme Solutions Inc., 450 Innovation Parkway, Suite 300, Austin TX 78701.",
-    "category": "finance"
-  },
-  {
-    "id": "eval-17",
-    "question": "What discount or penalty applies for late payment on the invoice?",
-    "expected_doc": "acme_invoice_scanned.pdf",
-    "expected_page": 1,
-    "ground_truth": "A 1.5% monthly finance charge applies to outstanding balances past 30 days.",
-    "category": "finance"
-  },
-  {
-    "id": "eval-18",
-    "question": "Does the company provide parental leave, and for how long?",
+    "id": "eval-012",
+    "question": "What authentication factor is mandatory on all company devices?",
     "expected_doc": "employee_handbook_2026.pdf",
     "expected_page": 1,
-    "ground_truth": "16 weeks of fully paid parental leave for primary caregivers and 8 weeks for secondary caregivers.",
+    "ground_truth": "multi-factor authentication (MFA)",
+    "category": "security"
+  },
+  {
+    "id": "eval-013",
+    "question": "Where must a suspected data breach be reported?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "reported immediately to security@company.internal",
+    "category": "security"
+  },
+  {
+    "id": "eval-014",
+    "question": "How quickly must a phishing attempt be escalated to the on-call security officer?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "escalated to the on-call security officer within 1 hour",
+    "category": "security"
+  },
+  {
+    "id": "eval-015",
+    "question": "Who can approve a remote or hybrid work arrangement?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "permitted for eligible roles with departmental lead approval",
     "category": "policy"
   },
   {
-    "id": "eval-19",
-    "question": "What is the 401(k) company match percentage?",
+    "id": "eval-016",
+    "question": "Do part-time employees accrue the same PTO as full-time employees?",
     "expected_doc": "employee_handbook_2026.pdf",
     "expected_page": 1,
-    "ground_truth": "100% match on the first 4% of eligible employee salary contributions.",
+    "ground_truth": "Full-time employees accrue 20 days of paid time off per calendar year",
+    "category": "policy"
+  },
+  {
+    "id": "eval-017",
+    "question": "What is the combined parental leave for one primary and one secondary caregiver?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "Primary caregivers receive 16 weeks of fully paid parental leave; secondary caregivers receive 8 weeks",
+    "category": "policy"
+  },
+  {
+    "id": "eval-018",
+    "question": "What happens to unused rollover PTO days after March 31st?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "expiring on March 31st if unspent",
+    "category": "policy"
+  },
+  {
+    "id": "eval-019",
+    "question": "Which two full-disk encryption tools are acceptable for company laptops?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "BitLocker or FileVault",
+    "category": "security"
+  },
+  {
+    "id": "eval-020",
+    "question": "Is the wellness stipend counted separately from the 401(k) match?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "An annual home office and wellness stipend of up to $1,200 is available for approved equipment and memberships",
+    "category": "policy"
+  },
+  {
+    "id": "eval-021",
+    "question": "What is the maximum 401(k) salary percentage matched by the company?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "an immediate 100% company match on the first 4% of eligible employee salary contributions",
+    "category": "policy"
+  },
+  {
+    "id": "eval-022",
+    "question": "And what happens if I don't use those five rollover days by the deadline?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "Up to 5 unused PTO days may roll over into the subsequent calendar year, expiring on March 31st if unspent",
+    "category": "follow-up"
+  },
+  {
+    "id": "eval-023",
+    "question": "What hardware factor is required to access production database infrastructure?",
+    "expected_doc": "it_security_compliance.pdf",
+    "expected_page": 1,
+    "ground_truth": "requires hardware security keys (FIDO2)",
+    "category": "security"
+  },
+  {
+    "id": "eval-024",
+    "question": "How are production role elevations granted under the JIT model?",
+    "expected_doc": "it_security_compliance.pdf",
+    "expected_page": 1,
+    "ground_truth": "just-in-time (JIT) role elevation via Okta",
+    "category": "security"
+  },
+  {
+    "id": "eval-025",
+    "question": "How often must credentials be rotated at minimum?",
+    "expected_doc": "it_security_compliance.pdf",
+    "expected_page": 1,
+    "ground_truth": "All credentials must be rotated at minimum every 90 days",
+    "category": "security"
+  },
+  {
+    "id": "eval-026",
+    "question": "Is root-level access allowed in customer-facing production VPCs?",
+    "expected_doc": "it_security_compliance.pdf",
+    "expected_page": 1,
+    "ground_truth": "Root-level access to cloud containers is strictly prohibited in customer-facing production VPCs",
+    "category": "security"
+  },
+  {
+    "id": "eval-027",
+    "question": "What encryption algorithm and key management are required for data at rest?",
+    "expected_doc": "it_security_compliance.pdf",
+    "expected_page": 1,
+    "ground_truth": "Data at rest must be encrypted using AES-256 with AWS KMS or HashiCorp Vault managed keys",
+    "category": "security"
+  },
+  {
+    "id": "eval-028",
+    "question": "Which TLS version is mandatory for data in transit?",
+    "expected_doc": "it_security_compliance.pdf",
+    "expected_page": 1,
+    "ground_truth": "All data in transit must utilize TLS 1.3 with cipher suites enforcing forward secrecy",
+    "category": "security"
+  },
+  {
+    "id": "eval-029",
+    "question": "How long are encrypted database backups retained?",
+    "expected_doc": "it_security_compliance.pdf",
+    "expected_page": 1,
+    "ground_truth": "Database backups are automatically encrypted and retained for 30 rolling calendar days",
+    "category": "security"
+  },
+  {
+    "id": "eval-030",
+    "question": "What security scans run on every Git commit?",
+    "expected_doc": "it_security_compliance.pdf",
+    "expected_page": 1,
+    "ground_truth": "Static application security testing (SAST) and container vulnerability scanning run on every Git commit",
+    "category": "security"
+  },
+  {
+    "id": "eval-031",
+    "question": "How frequently are third-party penetration tests commissioned?",
+    "expected_doc": "it_security_compliance.pdf",
+    "expected_page": 1,
+    "ground_truth": "Third-party penetration tests are commissioned semi-annually",
+    "category": "security"
+  },
+  {
+    "id": "eval-032",
+    "question": "What is the remediation deadline for critical vulnerabilities with CVSS above 9.0?",
+    "expected_doc": "it_security_compliance.pdf",
+    "expected_page": 1,
+    "ground_truth": "Critical vulnerabilities (CVSS > 9.0) must be remediated or mitigated within 48 hours of public disclosure",
+    "category": "security"
+  },
+  {
+    "id": "eval-033",
+    "question": "Which compliance frameworks does the IT security standard map to?",
+    "expected_doc": "it_security_compliance.pdf",
+    "expected_page": 1,
+    "ground_truth": "GLOBAL CLOUD SERVICES - IT SECURITY & COMPLIANCE STANDARD (SOC2 / ISO 27001)",
+    "category": "security"
+  },
+  {
+    "id": "eval-034",
+    "question": "Does the policy allow credential rotation windows longer than 90 days?",
+    "expected_doc": "it_security_compliance.pdf",
+    "expected_page": 1,
+    "ground_truth": "All credentials must be rotated at minimum every 90 days",
+    "category": "policy"
+  },
+  {
+    "id": "eval-035",
+    "question": "And how does that 90-day rotation rule interact with the JIT elevation model?",
+    "expected_doc": "it_security_compliance.pdf",
+    "expected_page": 1,
+    "ground_truth": "Access to production database infrastructure and pgvector clusters requires hardware security keys (FIDO2) and just-in-time (JIT) role elevation via Okta. All credentials must be rotated at minimum every 90 days",
+    "category": "follow-up"
+  },
+  {
+    "id": "eval-036",
+    "question": "What was the total revenue for the third quarter?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "Total revenue for the third quarter reached $48.2 million",
     "category": "finance"
   },
   {
-    "id": "eval-20",
-    "question": "How are combinatorial ideas explored in agent prompt chains?",
+    "id": "eval-037",
+    "question": "What was the year-over-year revenue growth rate?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "reflecting a 22% year-over-year increase",
+    "category": "finance"
+  },
+  {
+    "id": "eval-038",
+    "question": "What share of receipts came from subscription software revenue?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "Subscription software revenue accounted for 78% of aggregate receipts ($37.6 million)",
+    "category": "finance"
+  },
+  {
+    "id": "eval-039",
+    "question": "What was the adjusted EBITDA figure?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "Adjusted EBITDA reached $12.4 million",
+    "category": "finance"
+  },
+  {
+    "id": "eval-040",
+    "question": "What operational margin was achieved in the quarter?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "an operational margin of 25.7%",
+    "category": "finance"
+  },
+  {
+    "id": "eval-041",
+    "question": "How much did the company spend on research and development?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "Research & Development (R&D): $16.8 million (AI agent inference pipelines and retrieval infrastructure)",
+    "category": "finance"
+  },
+  {
+    "id": "eval-042",
+    "question": "What was the sales and marketing expense for the quarter?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "Sales and Marketing: $11.2 million",
+    "category": "finance"
+  },
+  {
+    "id": "eval-043",
+    "question": "What was the general and administrative expense?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "General and Administrative: $5.8 million",
+    "category": "finance"
+  },
+  {
+    "id": "eval-044",
+    "question": "What were capital expenditures allocated to?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "Capital Expenditures: $2.0 million dedicated to on-premise GPU clusters for local LLM fine-tuning",
+    "category": "finance"
+  },
+  {
+    "id": "eval-045",
+    "question": "What was the cash position at the end of the quarter?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "Cash and cash equivalents ended the quarter at $84.5 million",
+    "category": "finance"
+  },
+  {
+    "id": "eval-046",
+    "question": "Does the company carry long-term debt?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "zero long-term debt obligations",
+    "category": "finance"
+  },
+  {
+    "id": "eval-047",
+    "question": "How many months of operational runway does the company have?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "approximately 28 months of operational runway under conservative baseline projections",
+    "category": "finance"
+  },
+  {
+    "id": "eval-048",
+    "question": "Which expense category funds the AI agent inference pipelines?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "Research & Development (R&D): $16.8 million (AI agent inference pipelines and retrieval infrastructure)",
+    "category": "finance"
+  },
+  {
+    "id": "eval-049",
+    "question": "And how does that R&D spend compare with the sales and marketing expense?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "Research & Development (R&D): $16.8 million (AI agent inference pipelines and retrieval infrastructure) Sales and Marketing: $11.2 million",
+    "category": "follow-up"
+  },
+  {
+    "id": "eval-050",
+    "question": "How many engineers did the company have at the end of Q3 2026?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 2,
+    "ground_truth": "Engineering headcount grew from 84 to 97 engineers during the quarter",
+    "category": "finance"
+  },
+  {
+    "id": "eval-051",
+    "question": "What was the total company headcount at quarter close?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 2,
+    "ground_truth": "total company headcount to 214 employees across 12 countries",
+    "category": "finance"
+  },
+  {
+    "id": "eval-052",
+    "question": "How many customer success employees were there at quarter close?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 2,
+    "ground_truth": "Customer Success: 26",
+    "category": "finance"
+  },
+  {
+    "id": "eval-053",
+    "question": "How many new hires does the Q4 2026 hiring plan target?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 2,
+    "ground_truth": "Q4 2026 hiring plan targets 24 new hires, of which 15 are engineering roles",
+    "category": "finance"
+  },
+  {
+    "id": "eval-054",
+    "question": "Which teams receive the Q4 engineering hires?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 2,
+    "ground_truth": "15 are engineering roles focused on the retrieval quality and document ingestion teams",
+    "category": "finance"
+  },
+  {
+    "id": "eval-055",
+    "question": "What was the attrition rate for the quarter?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 2,
+    "ground_truth": "Attrition for the quarter was 3.1%",
+    "category": "finance"
+  },
+  {
+    "id": "eval-056",
+    "question": "How many paying customers did the company have at quarter end?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 2,
+    "ground_truth": "1,840 paying customers at quarter end (net new: 112)",
+    "category": "finance"
+  },
+  {
+    "id": "eval-057",
+    "question": "What was the net revenue retention figure?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 2,
+    "ground_truth": "net revenue retention of 118%",
+    "category": "finance"
+  },
+  {
+    "id": "eval-058",
+    "question": "What is the average contract value across the customer base?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 2,
+    "ground_truth": "The average contract value (ACV) across the customer base is $26,196",
+    "category": "finance"
+  },
+  {
+    "id": "eval-059",
+    "question": "How many countries does the company operate in?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 2,
+    "ground_truth": "214 employees across 12 countries",
+    "category": "finance"
+  },
+  {
+    "id": "eval-060",
+    "question": "What was the sales department headcount at quarter close?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 2,
+    "ground_truth": "Sales: 41",
+    "category": "finance"
+  },
+  {
+    "id": "eval-061",
+    "question": "How many marketing employees were there at quarter close?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 2,
+    "ground_truth": "Marketing: 18",
+    "category": "finance"
+  },
+  {
+    "id": "eval-062",
+    "question": "What is the Q3 budget for cloud infrastructure (GPU)?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "Cloud infrastructure (GPU) Q3 1,480",
+    "category": "finance"
+  },
+  {
+    "id": "eval-063",
+    "question": "What is the FY2026 total for model hosting and inference?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "Model hosting and inference FY total 3,050",
+    "category": "finance"
+  },
+  {
+    "id": "eval-064",
+    "question": "What is the full-year payroll budget for engineering?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "Payroll - engineering FY total 17,300",
+    "category": "finance"
+  },
+  {
+    "id": "eval-065",
+    "question": "What is the Q4 budget for payroll - go-to-market?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "Payroll - go-to-market Q4 2,050",
+    "category": "finance"
+  },
+  {
+    "id": "eval-066",
+    "question": "What is the FY total for office and facilities?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "Office and facilities FY total 1,270",
+    "category": "finance"
+  },
+  {
+    "id": "eval-067",
+    "question": "How much is budgeted for marketing programs in Q3?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "Marketing programs Q3 610",
+    "category": "finance"
+  },
+  {
+    "id": "eval-068",
+    "question": "What is the compliance and audits budget for Q3?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "Compliance and audits Q3 260",
+    "category": "finance"
+  },
+  {
+    "id": "eval-069",
+    "question": "What is the quarterly contingency reserve amount?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "Contingency reserve 200 per quarter",
+    "category": "finance"
+  },
+  {
+    "id": "eval-070",
+    "question": "What is the FY2026 total operating budget?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "The FY2026 total operating budget is $38,750 thousand",
+    "category": "finance"
+  },
+  {
+    "id": "eval-071",
+    "question": "What revenue plan does the FY2026 budget assume?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "against a revenue plan of $196.0 million",
+    "category": "finance"
+  },
+  {
+    "id": "eval-072",
+    "question": "What planned operating margin does the budget yield?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "yielding a planned operating margin of approximately 80.2%",
+    "category": "finance"
+  },
+  {
+    "id": "eval-073",
+    "question": "Who must sign off to release the contingency reserve?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "The contingency reserve is released to departments only with CFO sign-off",
+    "category": "policy"
+  },
+  {
+    "id": "eval-074",
+    "question": "Which line item shows the largest quarter-over-quarter increase?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "The largest single quarter-over-quarter increase is model hosting and inference",
+    "category": "finance"
+  },
+  {
+    "id": "eval-075",
+    "question": "What drove the increase in model hosting costs in Q3?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "driven by the embedding volume growth from document ingestion (38% quarter-over-quarter in Q3)",
+    "category": "finance"
+  },
+  {
+    "id": "eval-076",
+    "question": "What currency and unit does the FY2026 budget use?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "FY2026 OPERATING BUDGET BREAKDOWN (APPROVED, USD THOUSANDS)",
+    "category": "finance"
+  },
+  {
+    "id": "eval-077",
+    "question": "And does the contingency reserve policy mention any approval requirement?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "The contingency reserve is released to departments only with CFO sign-off",
+    "category": "follow-up"
+  },
+  {
+    "id": "eval-078",
+    "question": "What is the invoice number on the ACME Logistics invoice?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "ACME Logistics - Invoice INV-2026-0042",
+    "category": "finance"
+  },
+  {
+    "id": "eval-079",
+    "question": "Who is billed on invoice INV-2026-0042?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "Bill To: Globex Corporation",
+    "category": "finance"
+  },
+  {
+    "id": "eval-080",
+    "question": "What is the invoice date?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "Invoice Date: March 4,2026",
+    "category": "finance"
+  },
+  {
+    "id": "eval-081",
+    "question": "When is payment due for invoice INV-2026-0042?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "Due Date: April 3, 2026",
+    "category": "finance"
+  },
+  {
+    "id": "eval-082",
+    "question": "What is the subtotal on the invoice?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "Subtotal: $2,380.50",
+    "category": "finance"
+  },
+  {
+    "id": "eval-083",
+    "question": "What is the tax rate applied on the invoice?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "Tax (8.5%): $202.34",
+    "category": "finance"
+  },
+  {
+    "id": "eval-084",
+    "question": "What is the total amount due?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "TOTAL DUE: $2,582.84",
+    "category": "finance"
+  },
+  {
+    "id": "eval-085",
+    "question": "What are the payment terms on the invoice?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "Payment terms: Net 30. Late fee 1.5% per month",
+    "category": "finance"
+  },
+  {
+    "id": "eval-086",
+    "question": "What is the late fee percentage on invoice INV-2026-0042?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "Late fee 1.5% per month",
+    "category": "finance"
+  },
+  {
+    "id": "eval-087",
+    "question": "Which account should payment be remitted to?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "Remit to: ACME Logistics, Account 8847291, Routing 021000021",
+    "category": "finance"
+  },
+  {
+    "id": "eval-088",
+    "question": "How much was charged for warehouse pallet storage?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "Warehouse pallet storage (200 sq ft) $1,400.00",
+    "category": "finance"
+  },
+  {
+    "id": "eval-089",
+    "question": "What is the customs brokerage fee on the invoice?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "Customs brokerage fee $120.00",
+    "category": "finance"
+  },
+  {
+    "id": "eval-090",
+    "question": "And how does the Net 30 due date compare with the invoice date?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "Invoice Date: March 4,2026 Due Date: April 3, 2026",
+    "category": "follow-up"
+  },
+  {
+    "id": "eval-091",
+    "question": "What is the primary thesis regarding AI agents and human creativity?",
     "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
-    "expected_page": 16,
-    "ground_truth": "By decomposing queries into orthogonal attribute spaces and recombining them using structured prompt templates with temperature variations.",
+    "expected_page": 1,
+    "ground_truth": "AI agents exhibit assistive and divergent creative capabilities, collaborating with human operators rather than completely replacing autonomous human creative intent",
+    "category": "conceptual"
+  },
+  {
+    "id": "eval-092",
+    "question": "How do human operators collaborate with AI agents according to the paper?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 2,
+    "ground_truth": "collaborating with human operators rather than completely replacing autonomous human creative intent",
+    "category": "conceptual"
+  },
+  {
+    "id": "eval-093",
+    "question": "What evaluative metrics does the paper propose for creative outputs?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 3,
+    "ground_truth": "novelty and value metrics for agent artifacts",
+    "category": "conceptual"
+  },
+  {
+    "id": "eval-094",
+    "question": "How does the paper distinguish divergent creativity?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 4,
+    "ground_truth": "divergent creative capabilities",
+    "category": "conceptual"
+  },
+  {
+    "id": "eval-095",
+    "question": "What is said about the novelty of AI-generated artifacts?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 5,
+    "ground_truth": "novelty and value metrics for agent artifacts",
     "category": "technical"
+  },
+  {
+    "id": "eval-096",
+    "question": "What risks does the paper attribute to autonomous creative agents?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 6,
+    "ground_truth": "assistive and divergent creative capabilities",
+    "category": "ethics"
+  },
+  {
+    "id": "eval-097",
+    "question": "How is the agent architecture described in the paper?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 7,
+    "ground_truth": "agent architecture",
+    "category": "architecture"
+  },
+  {
+    "id": "eval-098",
+    "question": "What role does memory play in the paper's agent design?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 8,
+    "ground_truth": "memory",
+    "category": "architecture"
+  },
+  {
+    "id": "eval-099",
+    "question": "What benchmark tasks are used to evaluate agent creativity?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 9,
+    "ground_truth": "benchmark",
+    "category": "technical"
+  },
+  {
+    "id": "eval-100",
+    "question": "What does the paper conclude about human-AI co-creation?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 10,
+    "ground_truth": "collaborating with human operators",
+    "category": "conceptual"
+  },
+  {
+    "id": "eval-101",
+    "question": "Which evaluation dimensions measure creative value?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 2,
+    "ground_truth": "Depending on the definition of creativity assumed, the psychometric tests employed, the use cases considered, and the level of proficiency",
+    "category": "conceptual"
+  },
+  {
+    "id": "eval-102",
+    "question": "What limitations of LLM-based creativity are discussed?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 1,
+    "ground_truth": "they exhibit functionalist creativity, albeit not at its most sophisticated levels, while they continue to lack key aspects",
+    "category": "technical"
+  },
+  {
+    "id": "eval-103",
+    "question": "How does the paper define assistive creativity?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 13,
+    "ground_truth": "assistive",
+    "category": "conceptual"
+  },
+  {
+    "id": "eval-104",
+    "question": "What examples of divergent thinking are given?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 14,
+    "ground_truth": "divergent",
+    "category": "conceptual"
+  },
+  {
+    "id": "eval-105",
+    "question": "What future research directions does the paper propose?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 15,
+    "ground_truth": "future research",
+    "category": "conceptual"
+  },
+  {
+    "id": "eval-106",
+    "question": "What computational resources are discussed for agent evaluation?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 3,
+    "ground_truth": "language models because they are trained on vast text corpora (e.g., almost the entirety of Web content) to learn the structure and patterns of human language",
+    "category": "technical"
+  },
+  {
+    "id": "eval-107",
+    "question": "How does the paper treat authorship of AI artifacts?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 1,
+    "ground_truth": "On the Creativity of AI Agents",
+    "category": "ethics"
+  },
+  {
+    "id": "eval-108",
+    "question": "What datasets support the paper's experiments?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 3,
+    "ground_truth": "trained on vast text corpora (e.g., almost the entirety of Web content)",
+    "category": "technical"
+  },
+  {
+    "id": "eval-109",
+    "question": "What safety considerations are raised for creative agents?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 2,
+    "ground_truth": "We highlight the gaps in current agentic systems and consider whether autonomous agents might reach higher creative capacities",
+    "category": "ethics"
+  },
+  {
+    "id": "eval-110",
+    "question": "Which sections discuss evaluation methodology in depth?",
+    "expected_doc": "On_the_Creativity_of_AI_Agents-1.pdf",
+    "expected_page": 2,
+    "ground_truth": "the psychometric tests employed [43, 54], the use cases considered [66, 50]",
+    "category": "technical"
+  },
+  {
+    "id": "eval-111",
+    "question": "Which document covers both encryption standards and penetration testing cadence?",
+    "expected_doc": "it_security_compliance.pdf",
+    "expected_page": 1,
+    "ground_truth": "GLOBAL CLOUD SERVICES - IT SECURITY & COMPLIANCE STANDARD (SOC2 / ISO 27001)",
+    "category": "multi-hop"
+  },
+  {
+    "id": "eval-112",
+    "question": "Which document discusses both the 401(k) match and the security incident reporting email?",
+    "expected_doc": "employee_handbook_2026.pdf",
+    "expected_page": 1,
+    "ground_truth": "Any suspected data breach, lost equipment, or phishing attempt must be reported immediately to security@company.internal",
+    "category": "multi-hop"
+  },
+  {
+    "id": "eval-113",
+    "question": "Where are both the operating budget total and the contingency reserve policy documented?",
+    "expected_doc": "fy2026_budget_breakdown.pdf",
+    "expected_page": 1,
+    "ground_truth": "The FY2026 total operating budget is $38,750 thousand against a revenue plan of $196.0 million",
+    "category": "multi-hop"
+  },
+  {
+    "id": "eval-114",
+    "question": "Which document contains both revenue results and headcount growth?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "Total revenue for the third quarter reached $48.2 million",
+    "category": "multi-hop"
+  },
+  {
+    "id": "eval-115",
+    "question": "Is the security incident escalation window longer or shorter than the invoice payment terms?",
+    "expected_doc": "acme_invoice_scanned.pdf",
+    "expected_page": 1,
+    "ground_truth": "Payment terms: Net 30. Late fee 1.5% per month",
+    "category": "multi-hop"
+  },
+  {
+    "id": "eval-116",
+    "question": "Do the budget's embedding growth drivers relate to the retrieval infrastructure named in the R&D expense?",
+    "expected_doc": "quarterly_financial_report.pdf",
+    "expected_page": 1,
+    "ground_truth": "Research & Development (R&D): $16.8 million (AI agent inference pipelines and retrieval infrastructure)",
+    "category": "multi-hop"
+  },
+  {
+    "id": "eval-117",
+    "question": "What is Acme Enterprises' stock price?",
+    "expected_doc": null,
+    "expected_page": null,
+    "ground_truth": "",
+    "category": "unanswerable"
+  },
+  {
+    "id": "eval-118",
+    "question": "Who is the CEO of the company?",
+    "expected_doc": null,
+    "expected_page": null,
+    "ground_truth": "",
+    "category": "unanswerable"
+  },
+  {
+    "id": "eval-119",
+    "question": "What is the company's parental leave policy in Japan specifically?",
+    "expected_doc": null,
+    "expected_page": null,
+    "ground_truth": "",
+    "category": "unanswerable"
+  },
+  {
+    "id": "eval-120",
+    "question": "When was the company founded?",
+    "expected_doc": null,
+    "expected_page": null,
+    "ground_truth": "",
+    "category": "unanswerable"
+  },
+  {
+    "id": "eval-121",
+    "question": "Who are the company's main competitors?",
+    "expected_doc": null,
+    "expected_page": null,
+    "ground_truth": "",
+    "category": "unanswerable"
+  },
+  {
+    "id": "eval-122",
+    "question": "What is the address of the Berlin office?",
+    "expected_doc": null,
+    "expected_page": null,
+    "ground_truth": "",
+    "category": "unanswerable"
+  },
+  {
+    "id": "eval-123",
+    "question": "What are the engineering salary bands?",
+    "expected_doc": null,
+    "expected_page": null,
+    "ground_truth": "",
+    "category": "unanswerable"
+  },
+  {
+    "id": "eval-124",
+    "question": "How many employees did the company have in 2020?",
+    "expected_doc": null,
+    "expected_page": null,
+    "ground_truth": "",
+    "category": "unanswerable"
+  },
+  {
+    "id": "eval-125",
+    "question": "What is the company's carbon footprint for 2026?",
+    "expected_doc": null,
+    "expected_page": null,
+    "ground_truth": "",
+    "category": "unanswerable"
+  },
+  {
+    "id": "eval-126",
+    "question": "Which holidays does the company observe in 2027?",
+    "expected_doc": null,
+    "expected_page": null,
+    "ground_truth": "",
+    "category": "unanswerable"
   }
 ]

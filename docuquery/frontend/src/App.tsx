@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
 import ChatPage from "./pages/Chat";
 import DocumentsPage from "./pages/Documents";
+import ExtractPage from "./pages/Extract";
 import StatsPage from "./pages/Stats";
 import {
   clearStoredToken,
   fetchHealth,
   fetchMe,
+  getStoredToken,
   loginUser,
+  refreshSession,
   registerUser,
 } from "./api";
 import type { User } from "./types";
 
-type Tab = "documents" | "chat" | "analytics";
+type Tab = "documents" | "chat" | "extract" | "analytics";
 type Health = Awaited<ReturnType<typeof fetchHealth>>;
 
 export default function App() {
@@ -41,6 +44,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // No stored access token: try extending the session via the HttpOnly
+    // refresh cookie before falling back to signed-out state.
+    if (!getStoredToken()) {
+      refreshSession()
+        .then((session) => {
+          if (session) setCurrentUser(session.user);
+        })
+        .catch(() => undefined);
+    }
     refreshHealth();
     refreshUser();
     const timer = setInterval(refreshHealth, 30_000);
@@ -114,7 +126,7 @@ export default function App() {
           </div>
 
           <nav className="ml-6 flex gap-1">
-            {(["documents", "chat", "analytics"] as const).map((t) => (
+            {(["documents", "chat", "extract", "analytics"] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -177,6 +189,7 @@ export default function App() {
       <main className="flex-1">
         {tab === "documents" && <DocumentsPage />}
         {tab === "chat" && <ChatPage />}
+        {tab === "extract" && <ExtractPage />}
         {tab === "analytics" && <StatsPage />}
       </main>
 

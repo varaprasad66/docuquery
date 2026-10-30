@@ -68,6 +68,13 @@ class DocumentStatus(str, PyEnum):
     failed = "failed"
 
 
+class ExtractionJobStatus(str, PyEnum):
+    pending = "pending"
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+
+
 class Document(TimestampMixin, Base):
     __tablename__ = "documents"
 
@@ -228,6 +235,86 @@ class AuditLog(Base):
     ip: Mapped[str | None] = mapped_column(String(64), default=None)
     user_agent: Mapped[str | None] = mapped_column(String(512), default=None)
     detail: Mapped[dict | None] = mapped_column(JSON, default=None)
+
+
+class ApiKey(TimestampMixin, Base):
+    """Programmatic access key (Phase 4 integrations). Only the SHA-256 hash is
+    stored — the raw key (dq_...-prefixed) is shown exactly once at creation.
+    Scopes: read | chat | upload; JWT sessions implicitly hold every scope."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), default="API key")
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    prefix: Mapped[str] = mapped_column(String(16))  # display form, e.g. dq_ab12cd34
+    scopes: Mapped[list | None] = mapped_column(JSON, default=list)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class Webhook(TimestampMixin, Base):
+    """Outgoing webhook subscription (document.ready / document.failed)."""
+
+    __tablename__ = "webhooks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    url: Mapped[str] = mapped_column(String(2048))
+    secret: Mapped[str] = mapped_column(String(128))  # HMAC-SHA256 signing key, shown once
+    events: Mapped[list | None] = mapped_column(JSON, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+
+
+class WebhookDelivery(Base):
+    """One row per delivery attempt series for an event, for observability."""
+
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), index=True
+    )
+    webhook_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("webhooks.id", ondelete="CASCADE"), index=True
+    )
+    event: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[dict | None] = mapped_column(JSON, default=None)
+    status: Mapped[str] = mapped_column(String(16))  # "delivered" | "failed"
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    response_code: Mapped[int | None] = mapped_column(Integer, default=None)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+
+
+class ExtractionJob(TimestampMixin, Base):
+    """Structured extraction run over one or more documents (professional+).
+
+    Created by POST /api/extract in async mode; executed on the existing worker
+    path. Results carry the extracted data, per-field source citations and the
+    model's self-assessed confidence."""
+
+    __tablename__ = "extraction_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), default=None, index=True
+    )
+    status: Mapped[ExtractionJobStatus] = mapped_column(
+        Enum(ExtractionJobStatus, name="extraction_job_status"),
+        default=ExtractionJobStatus.pending,
+        index=True,
+    )
+    template: Mapped[str] = mapped_column(String(64), default="custom")
+    document_ids: Mapped[list | None] = mapped_column(JSON, default=None)
+    schema_json: Mapped[dict | None] = mapped_column(JSON, default=None)
+    result: Mapped[dict | None] = mapped_column(JSON, default=None)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    confidence: Mapped[str | None] = mapped_column(String(16), default=None)
 
 
 class SemanticCacheEntry(Base):

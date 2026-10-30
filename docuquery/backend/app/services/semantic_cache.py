@@ -41,6 +41,7 @@ async def lookup(
     owner_id: UUID | None,
     query_vector_literal: str,
     question: str,
+    document_ids: list[str] | None = None,
 ) -> CacheHit | None:
     s = get_settings()
     if not s.cache_enabled:
@@ -61,7 +62,7 @@ async def lookup(
             ),
             {
                 "qvec": query_vector_literal,
-                "scope": scope_hash(owner_id),
+                "scope": scope_hash(owner_id, document_ids),
             },
         )
         row = rows.first()
@@ -94,6 +95,7 @@ async def store(
     methods: list,
     prompt_tokens: int,
     completion_tokens: int,
+    document_ids: list[str] | None = None,
 ) -> None:
     s = get_settings()
     if not s.cache_enabled:
@@ -110,7 +112,7 @@ async def store(
                 """
             ),
             {
-                "scope": scope_hash(owner_id),
+                "scope": scope_hash(owner_id, document_ids),
                 "question": question[:2000],
                 "qvec": question_embedding_literal,
                 "answer": answer,

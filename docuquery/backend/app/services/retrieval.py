@@ -87,6 +87,8 @@ async def retrieve(
     if owner_id is not None:
         binds["owner_id"] = str(owner_id)
 
+    # B608 reviewed: the interpolated fragments are static SQL plus bind
+    # placeholders (:doc_i) — user values never enter the query string.
     doc_filter = ""
     if document_ids:
         # Parameterized per-id binds; UUIDs are validated by the API schema.
@@ -101,21 +103,17 @@ async def retrieve(
     try:
         query_vector = _vector_literal((await embed_texts([query]))[0])
         binds["qvec"] = query_vector
-        rows = await db.execute(
-            text(
-                f"""
-                SELECT c.id, c.document_id, d.original_name, c.page, c.location, c.content,
-                       (c.embedding <=> CAST(:qvec AS vector)) AS distance
-                FROM chunks c
-                JOIN documents d ON d.id = c.document_id
-                WHERE d.status = 'ready' AND c.embedding IS NOT NULL
-                  AND {visibility}{doc_filter}
-                ORDER BY c.embedding <=> CAST(:qvec AS vector)
-                LIMIT :k
-                """
-            ),
-            binds,
-        )
+        vector_sql = f"""
+            SELECT c.id, c.document_id, d.original_name, c.page, c.location, c.content,
+                   (c.embedding <=> CAST(:qvec AS vector)) AS distance
+            FROM chunks c
+            JOIN documents d ON d.id = c.document_id
+            WHERE d.status = 'ready' AND c.embedding IS NOT NULL
+              AND {visibility}{doc_filter}
+            ORDER BY c.embedding <=> CAST(:qvec AS vector)
+            LIMIT :k
+            """  # nosec B608 - binds-only interpolation, see doc_filter note
+        rows = await db.execute(text(vector_sql), binds)
         for row in rows:
             vector_hits.append(
                 Source(
@@ -142,22 +140,18 @@ async def retrieve(
     if sanitized_terms:
         or_query = " | ".join(sanitized_terms)
         binds["q"] = or_query
-        rows = await db.execute(
-            text(
-                f"""
-                SELECT c.id, c.document_id, d.original_name, c.page, c.location, c.content,
-                       ts_rank_cd(c.tsv, query) AS rank
-                FROM chunks c
-                JOIN documents d ON d.id = c.document_id
-                JOIN to_tsquery('english', :q) query ON c.tsv @@ query
-                WHERE d.status = 'ready'
-                  AND {visibility}{doc_filter}
-                ORDER BY rank DESC
-                LIMIT :k
-                """
-            ),
-            binds,
-        )
+        keyword_sql = f"""
+            SELECT c.id, c.document_id, d.original_name, c.page, c.location, c.content,
+                   ts_rank_cd(c.tsv, query) AS rank
+            FROM chunks c
+            JOIN documents d ON d.id = c.document_id
+            JOIN to_tsquery('english', :q) query ON c.tsv @@ query
+            WHERE d.status = 'ready'
+              AND {visibility}{doc_filter}
+            ORDER BY rank DESC
+            LIMIT :k
+            """  # nosec B608 - binds-only interpolation, see doc_filter note
+        rows = await db.execute(text(keyword_sql), binds)
         for row in rows:
             keyword_hits.append(
                 Source(
@@ -175,5 +169,15 @@ async def retrieve(
         methods.append("bm25")
 
     # --- Reciprocal rank fusion ---
-    ranked = fuse_rrf(vector_hits, keyword_hits, top_k)
+    # With the optional reranker enabled, fuse the wider candidate pool
+    # (top_k * multiplier) and let the cross-encoder pick the final top_k;
+    # otherwise RRF's top_k is the final result.
+    from app.config import get_settings
+
+    fused_limit = top_k * candidate_multiplier if get_settings().reranker_enabled else top_k
+    ranked = fuse_rrf(vector_hits, keyword_hits, fused_limit)
+    if get_settings().reranker_enabled and ranked:
+        from app.services.reranker import rerank_sources
+
+        ranked = rerank_sources(query, ranked, top_k)
     return ranked, methods

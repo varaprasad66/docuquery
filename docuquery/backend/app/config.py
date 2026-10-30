@@ -65,10 +65,50 @@ class Settings(BaseSettings):
     url_import_enabled: bool = True
     url_fetch_timeout_seconds: int = 20
 
+    # Retrieval quality
+    # Follow-up rewriter: turns "what about page 2?" into a standalone query
+    # using recent conversation history. Falls back to the original question.
+    query_rewrite_enabled: bool = True
+    query_rewrite_timeout_seconds: int = 8
+    # Optional local cross-encoder reranker (needs the `sentence-transformers`
+    # extra: pip install -e ".[rerank]"). Disabled by default; any failure
+    # falls back to the fused RRF order.
+    reranker_enabled: bool = False
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+    # Structured extraction (professional edition). Chunks per document fed to
+    # the model, in document order; extraction answers get their own token cap.
+    extract_max_chunks_per_doc: int = 30
+    extract_max_tokens: int = 2000
+
+    # Outgoing webhooks (document.ready / document.failed)
+    webhook_max_attempts: int = 3
+    webhook_retry_backoff_seconds: float = 2.0
+    webhook_timeout_seconds: int = 10
+
+    # Upload malware scanning (optional ClamAV clamd via TCP INSTREAM).
+    clamav_enabled: bool = False
+    clamav_host: str = "localhost"
+    clamav_port: int = 3310
+    clamav_timeout_seconds: int = 5
+
+    # Eval gate: scripts/run_eval.py exits non-zero when hit@6 falls below
+    # this fraction. Raise toward 1.0 as the corpus and golden set mature.
+    eval_min_hit6: float = 0.5
+    # Optional LLM-as-judge pass (faithfulness / answer relevance / refusals).
+    eval_judge_enabled: bool = False
+    eval_judge_model: str | None = None  # defaults to LLM_MODEL
+
+    # Production boot guards. https_enabled asserts TLS terminates in front of
+    # this deployment (reverse proxy or load balancer).
+    https_enabled: bool = False
+
     # Auth
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
-    jwt_expires_minutes: int = 60 * 24 * 7
+    # Short-lived access token; the refresh flow (HttpOnly cookie) extends the
+    # session. 30 minutes bounds the blast radius of a leaked access token.
+    jwt_expires_minutes: int = 30
     refresh_token_expires_days: int = 30
     password_min_length: int = 10
     login_max_attempts: int = 5
@@ -116,6 +156,29 @@ def _validate_production(settings: "Settings") -> None:
         )
     if settings.debug:
         raise RuntimeError("DEBUG must be False in production.")
+    if "*" in settings.cors_origins:
+        raise RuntimeError(
+            "Refusing to start in production with a wildcard CORS origin. "
+            "List the exact frontend origins in CORS_ORIGINS."
+        )
+    database_url = settings.database_url
+    if ":" in database_url:
+        # postgresql+psycopg://user:password@host/db
+        try:
+            after_scheme = database_url.split("://", 1)[1]
+            password = after_scheme.split("@", 1)[0].split(":", 1)[1]
+        except IndexError:
+            password = ""
+        if password.strip() in ("", "docuquery", "postgres", "password", "changeme"):
+            raise RuntimeError(
+                "Refusing to start in production with a weak/default database "
+                "password. Set a strong password in DATABASE_URL."
+            )
+    if not settings.https_enabled:
+        raise RuntimeError(
+            "Refusing to start in production without HTTPS. Terminate TLS in a "
+            "reverse proxy and set HTTPS_ENABLED=True in the environment."
+        )
 
 
 @lru_cache

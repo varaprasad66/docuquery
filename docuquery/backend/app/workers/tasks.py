@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
-from app.db.models import Chunk, Document, DocumentStatus
+from app.db.models import Chunk, Document, DocumentStatus, ExtractionJob, ExtractionJobStatus
 from app.services import parsers
 from app.services.chunker import chunk_text, estimate_tokens
 from app.services.embeddings import embed_texts_sync
@@ -163,6 +163,11 @@ def process_document_core(document_id: str) -> None:
             doc.chunk_count = len(chunk_rows)
             doc.error = None
             db.commit()
+            _fire_webhook(doc.owner_id, "document.ready", {
+                "document_id": str(doc.id),
+                "document_name": doc.original_name,
+                "chunk_count": len(chunk_rows),
+            })
 
         logger.info(
             "Doc %s ready: %d chunks across %d sections processed in %.1fs",
@@ -181,12 +186,27 @@ def process_document_core(document_id: str) -> None:
                 doc.status = DocumentStatus.failed
                 doc.error = f"{type(exc).__name__}: {exc}"[:2000]
                 db.commit()
+                _fire_webhook(doc.owner_id, "document.failed", {
+                    "document_id": str(doc.id),
+                    "document_name": doc.original_name,
+                    "error": doc.error,
+                })
         except Exception as inner_exc:
             logger.error("Failed to update failed status in DB: %s", inner_exc)
     finally:
         # The corpus changed: cached answers may reference outdated content.
         _invalidate_answer_cache(db)
         db.close()
+
+
+def _fire_webhook(owner_id, event: str, payload: dict) -> None:
+    """Best-effort webhook dispatch on the worker path (sync, never raises)."""
+    try:
+        from app.services.webhooks import dispatch_event_sync
+
+        dispatch_event_sync(owner_id, event, payload)
+    except Exception:
+        logger.warning("Webhook dispatch for %s failed", event, exc_info=True)
 
 
 def _invalidate_answer_cache(db: Session) -> None:
@@ -209,3 +229,98 @@ def _invalidate_answer_cache(db: Session) -> None:
 @celery_app.task(name="process_document", bind=True, max_retries=1)
 def process_document(self, document_id: str) -> None:
     process_document_core(document_id)
+
+
+def process_extraction_job_core(job_id: str) -> None:
+    """Run a structured extraction job on the worker path (sync context).
+
+    DB access stays sync; the shared extraction core runs in a fresh event loop
+    whose ask_json bridges to the sync OpenAI client via to_thread.
+    """
+    import asyncio
+    import json as jsonlib
+
+    from app.services.extraction import Excerpt, run_extraction_core
+    from app.services.llm import sync_llm_client
+
+    db = _session_factory()()
+    try:
+        job = db.get(ExtractionJob, uuidlib.UUID(job_id))
+        if job is None:
+            logger.error("Extraction job %s not found", job_id)
+            return
+        job.status = ExtractionJobStatus.running
+        job.error = None
+        db.commit()
+
+        settings = get_settings()
+        excerpts: list[Excerpt] = []
+        for doc_id in job.document_ids or []:
+            doc = db.get(Document, uuidlib.UUID(str(doc_id)))
+            if doc is None or doc.status != DocumentStatus.ready:
+                continue
+            chunks = (
+                db.query(Chunk)
+                .filter(Chunk.document_id == doc.id)
+                .order_by(Chunk.chunk_index)
+                .limit(settings.extract_max_chunks_per_doc)
+                .all()
+            )
+            for chunk in chunks:
+                excerpts.append(
+                    Excerpt(
+                        index=len(excerpts) + 1,
+                        document_name=doc.original_name,
+                        location=chunk.location or f"Page {chunk.page}",
+                        content=chunk.content,
+                    )
+                )
+
+        schema = job.schema_json or {}
+        client = sync_llm_client()
+
+        def _sync_ask(messages: list[dict]) -> str:
+            response = client.chat.completions.create(
+                model=settings.llm_model,
+                messages=messages,
+                temperature=0.0,
+                max_tokens=settings.extract_max_tokens,
+                stream=False,
+            )
+            return response.choices[0].message.content or ""
+
+        async def _ask_json(messages: list[dict]) -> str:
+            return await asyncio.to_thread(_sync_ask, messages)
+
+        result = asyncio.run(
+            run_extraction_core(schema, excerpts, _ask_json, job.template)
+        )
+        job.result = {
+            "data": result.data,
+            "confidence": result.confidence,
+            "citations": result.citations,
+            "template": result.template,
+        }
+        job.confidence = result.confidence
+        job.status = ExtractionJobStatus.completed
+        db.commit()
+        logger.info("Extraction job %s completed (%d excerpts)", job_id, len(excerpts))
+
+    except Exception as exc:
+        logger.exception("Extraction job %s failed", job_id)
+        try:
+            db.rollback()
+            job = db.get(ExtractionJob, uuidlib.UUID(job_id))
+            if job is not None:
+                job.status = ExtractionJobStatus.failed
+                job.error = f"{type(exc).__name__}: {exc}"[:2000]
+                db.commit()
+        except Exception as inner_exc:
+            logger.error("Failed to record extraction failure: %s", inner_exc)
+    finally:
+        db.close()
+
+
+@celery_app.task(name="process_extraction_job", bind=True, max_retries=1)
+def process_extraction_job(self, job_id: str) -> None:
+    process_extraction_job_core(job_id)

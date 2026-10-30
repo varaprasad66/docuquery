@@ -6,7 +6,7 @@ import secrets
 import uuid as uuidlib
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +39,48 @@ def _hash_refresh_token(token: str) -> str:
 
 def _new_refresh_token() -> str:
     return secrets.token_urlsafe(48)
+
+
+REFRESH_COOKIE = "docuquery_refresh"
+
+
+def _set_refresh_cookie(response: Response, token: str) -> None:
+    """Refresh tokens live in an HttpOnly cookie (JS and XSS cannot read them).
+    Secure is forced in production; the cookie is scoped to /api/auth."""
+    s = get_settings()
+    response.set_cookie(
+        REFRESH_COOKIE,
+        token,
+        max_age=s.refresh_token_expires_days * 86400,
+        httponly=True,
+        secure=s.is_production,
+        samesite="lax",
+        path="/api/auth",
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(REFRESH_COOKIE, path="/api/auth")
+
+
+def _require_csrf_header(request: Request) -> None:
+    """Cookie-based refresh must carry X-Requested-With: a cross-site attacker
+    cannot set custom headers on cross-origin requests (SOP)."""
+    if request.headers.get("x-requested-with", "").lower() != "xmlhttprequest":
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Missing X-Requested-With header for cookie-based refresh (CSRF protection).",
+        )
+
+
+def _token_response(
+    request: Request, response: Response, access_token: str, refresh_token: str, user
+) -> TokenResponse:
+    """Always set the HttpOnly refresh cookie. In non-production the token is
+    also returned in the body (dev/test convenience); production is cookie-only."""
+    _set_refresh_cookie(response, refresh_token)
+    body_token = None if get_settings().is_production else refresh_token
+    return TokenResponse(access_token=access_token, refresh_token=body_token, user=UserOut.model_validate(user))
 
 
 async def _issue_refresh_token(db: AsyncSession, user_id: uuidlib.UUID) -> str:
@@ -76,6 +118,7 @@ async def _authenticate(body: UserLogin, db: AsyncSession) -> User:
 async def register(
     body: UserRegister,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     existing = await db.execute(select(User).where(User.email == body.email.lower()))
@@ -104,13 +147,14 @@ async def register(
     token = create_access_token(user.id, user.email)
     refresh = await _issue_refresh_token(db, user.id)
     await db.commit()
-    return TokenResponse(access_token=token, refresh_token=refresh, user=UserOut.model_validate(user))
+    return _token_response(request, response, token, refresh, user)
 
 
 @router.post("/login", response_model=TokenResponse, dependencies=[Depends(rate_limit_auth)])
 async def login(
     body: UserLogin,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     ip, ua = await client_identity(request)
@@ -141,17 +185,30 @@ async def login(
         db, "auth.login", actor_id=user.id, actor_email=user.email, ip=ip, user_agent=ua
     )
     await db.commit()
-    return TokenResponse(access_token=token, refresh_token=refresh, user=UserOut.model_validate(user))
+    return _token_response(request, response, token, refresh, user)
 
 
 @router.post("/refresh", response_model=TokenResponse, dependencies=[Depends(rate_limit_auth)])
 async def refresh(
-    body: RefreshRequest,
+    request: Request,
+    response: Response,
+    body: RefreshRequest | None = None,
     db: AsyncSession = Depends(get_db),
+    refresh_cookie: str | None = Cookie(None, alias=REFRESH_COOKIE),
 ):
     """Rotate a refresh token. Reuse of an already-rotated/revoked token revokes the
-    whole family (theft detection) and requires re-login."""
-    token_hash = _hash_refresh_token(body.refresh_token)
+    whole family (theft detection) and requires re-login.
+
+    The token comes from the HttpOnly cookie (browsers; CSRF-guarded by the
+    X-Requested-With header) or from the request body (API clients)."""
+    if body is not None and body.refresh_token:
+        presented = body.refresh_token
+    elif refresh_cookie:
+        _require_csrf_header(request)
+        presented = refresh_cookie
+    else:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token.")
+    token_hash = _hash_refresh_token(presented)
     result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
     stored = result.scalar_one_or_none()
 
@@ -194,24 +251,32 @@ async def refresh(
     await db.commit()
 
     token = create_access_token(user.id, user.email)
-    return TokenResponse(access_token=token, refresh_token=new_token, user=UserOut.model_validate(user))
+    return _token_response(request, response, token, new_token, user)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
-    body: RefreshRequest,
     request: Request,
+    response: Response,
+    body: RefreshRequest | None = None,
     authorization: str | None = Header(None),
     db: AsyncSession = Depends(get_db),
+    refresh_cookie: str | None = Cookie(None, alias=REFRESH_COOKIE),
 ):
     """Revoke the presented refresh token (whole family if it was already revoked)
     and blacklist the caller's access token until its natural expiry."""
     ip, ua = await client_identity(request)
 
     # 1. Refresh token revocation.
-    token_hash = _hash_refresh_token(body.refresh_token)
-    result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
-    stored = result.scalar_one_or_none()
+    presented = (body.refresh_token if body is not None else None) or refresh_cookie
+    if presented:
+        token_hash = _hash_refresh_token(presented)
+    else:
+        token_hash = None
+    stored = None
+    if token_hash:
+        result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+        stored = result.scalar_one_or_none()
     if stored is not None:
         if stored.revoked:
             rows = (
@@ -236,6 +301,7 @@ async def logout(
 
                 token_blacklist.revoke(payload["jti"], float(payload.get("exp", 0)))
 
+    _clear_refresh_cookie(response)
     await record_audit(
         db,
         "auth.logout",

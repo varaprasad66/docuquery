@@ -1,0 +1,10 @@
+# Bandit configuration for the DocuQuery backend.
+# Run: bandit -c bandit.yaml -r app
+exclude_dirs: ["../tests", "../tests_integration", ".venv", "build"]
+
+skips:
+  # B101: assert usage — production code never asserts; tests do.
+  - B101
+  # B104: binding to 0.0.0.0 — the container/prod bind is configured by the
+  # deployment (run.py binds localhost; Docker binds all by design).
+  - B104

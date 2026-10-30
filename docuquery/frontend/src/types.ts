@@ -22,6 +22,32 @@ export interface Citation {
   snippet: string;
 }
 
+export interface ExtractFieldCitation {
+  field: string;
+  excerpt: number;
+  document_name: string;
+  location: string;
+}
+
+export interface ExtractResult {
+  data: Record<string, unknown>;
+  confidence: "high" | "medium" | "low";
+  citations: ExtractFieldCitation[];
+  template: string;
+}
+
+export type ExtractionJobStatus = "pending" | "running" | "completed" | "failed";
+
+export interface ExtractJob {
+  id: string;
+  status: ExtractionJobStatus;
+  template: string;
+  document_ids: string[] | null;
+  result: ExtractResult | null;
+  error: string | null;
+  confidence: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";

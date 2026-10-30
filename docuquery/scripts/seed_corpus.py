@@ -89,8 +89,8 @@ must be remediated or mitigated within 48 hours of public disclosure.
 
 def create_financial_report(path: Path) -> None:
     doc = fitz.open()
-    page = doc.new_page(width=595, height=842)
 
+    page = doc.new_page(width=595, height=842)
     text = """Q3 2026 FINANCIAL AND OPERATIONAL REVIEW
 
 Executive Summary:
@@ -109,6 +109,57 @@ Cash and cash equivalents ended the quarter at $84.5 million with zero long-term
 yielding approximately 28 months of operational runway under conservative baseline projections.
 """
     page.insert_textbox(fitz.Rect(40, 60, 555, 800), text, fontsize=10.5, fontname="helv")
+
+    page2 = doc.new_page(width=595, height=842)
+    text2 = """Q3 2026 HEADCOUNT AND HIRING PLAN
+
+Engineering headcount grew from 84 to 97 engineers during the quarter, bringing the
+total company headcount to 214 employees across 12 countries.
+
+Department headcount at quarter close:
+- Engineering: 97
+- Sales: 41
+- Marketing: 18
+- Customer Success: 26
+- General & Administrative: 32
+
+Q4 2026 hiring plan targets 24 new hires, of which 15 are engineering roles focused on
+the retrieval quality and document ingestion teams. Attrition for the quarter was 3.1%.
+
+Customer metrics: 1,840 paying customers at quarter end (net new: 112), with net revenue
+retention of 118%. The average contract value (ACV) across the customer base is $26,196.
+"""
+    page2.insert_textbox(fitz.Rect(40, 60, 555, 800), text2, fontsize=10.5, fontname="helv")
+
+    path.write_bytes(doc.tobytes())
+    logger.info("Generated %s", path.name)
+
+
+def create_budget_breakdown(path: Path) -> None:
+    """Table-heavy document: exercises table/number retrieval."""
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+
+    text = """FY2026 OPERATING BUDGET BREAKDOWN (APPROVED, USD THOUSANDS)
+
+Line item                      | Q1      | Q2      | Q3      | Q4      | FY total
+Cloud infrastructure (GPU)     | 1,250   | 1,310   | 1,480   | 1,520   | 5,560
+Model hosting and inference    |   640   |   700   |   810   |   900   | 3,050
+Payroll - engineering          | 4,100   | 4,250   | 4,400   | 4,550   | 17,300
+Payroll - go-to-market         | 1,900   | 1,950   | 2,000   | 2,050   | 7,900
+Office and facilities          |   310   |   310   |   325   |   325   | 1,270
+Marketing programs             |   480   |   520   |   610   |   590   | 2,200
+Compliance and audits          |   150   |   120   |   260   |   140   |   670
+Contingency reserve            |   200   |   200   |   200   |   200   |   800
+
+Budget notes:
+The contingency reserve is released to departments only with CFO sign-off. The largest
+single quarter-over-quarter increase is model hosting and inference, driven by the
+embedding volume growth from document ingestion (38% quarter-over-quarter in Q3).
+The FY2026 total operating budget is $38,750 thousand against a revenue plan of
+$196.0 million, yielding a planned operating margin of approximately 80.2%.
+"""
+    page.insert_textbox(fitz.Rect(40, 60, 555, 800), text, fontsize=9.5, fontname="cour")
     path.write_bytes(doc.tobytes())
     logger.info("Generated %s", path.name)
 
@@ -125,6 +176,10 @@ def generate_all_sample_files() -> list[Path]:
     finance_path = SAMPLE_DOCS_DIR / "quarterly_financial_report.pdf"
     if not finance_path.exists():
         create_financial_report(finance_path)
+
+    budget_path = SAMPLE_DOCS_DIR / "fy2026_budget_breakdown.pdf"
+    if not budget_path.exists():
+        create_budget_breakdown(budget_path)
 
     # List all available sample files
     sample_files = list(SAMPLE_DOCS_DIR.glob("*.pdf"))
