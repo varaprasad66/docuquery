@@ -73,6 +73,8 @@ def extract_pages(
     pages: list[PageText] = []
 
     with fitz.open(pdf_path) as doc:
+        if getattr(doc, "needs_pass", False) and not doc.authenticate(""):
+            raise ValueError("Password-protected PDFs are not supported.")
         total = doc.page_count
         for i, page in enumerate(doc):
             page_no = i + 1

@@ -5,6 +5,7 @@ from enum import Enum as PyEnum
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     Enum,
     Float,
@@ -38,6 +39,11 @@ class TimestampMixin:
     )
 
 
+class UserRole(str, PyEnum):
+    user = "user"
+    admin = "admin"
+
+
 class User(TimestampMixin, Base):
     __tablename__ = "users"
 
@@ -45,8 +51,15 @@ class User(TimestampMixin, Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     display_name: Mapped[str | None] = mapped_column(String(120), default=None)
+    role: Mapped[str] = mapped_column(String(16), default=UserRole.user.value, server_default="user")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
 
     documents: Mapped[list["Document"]] = relationship(back_populates="owner")
+
+
+class DocumentVisibility(str, PyEnum):
+    private = "private"
+    public = "public"
 
 
 class DocumentStatus(str, PyEnum):
@@ -62,6 +75,7 @@ class Document(TimestampMixin, Base):
     original_name: Mapped[str] = mapped_column(String(512))
     stored_path: Mapped[str] = mapped_column(String(1024))
     mime_type: Mapped[str] = mapped_column(String(255), default="application/pdf")
+    source_url: Mapped[str | None] = mapped_column(String(2048), default=None)  # set for URL imports
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[DocumentStatus] = mapped_column(
         Enum(DocumentStatus, name="document_status"),
@@ -74,6 +88,12 @@ class Document(TimestampMixin, Base):
     progress: Mapped[float] = mapped_column(Float, default=0.0)  # 0.0 - 1.0 during processing
     owner_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), default=None, index=True
+    )
+    visibility: Mapped[str] = mapped_column(
+        String(16),
+        default=DocumentVisibility.public.value,
+        server_default="public",
+        index=True,
     )
 
     owner: Mapped[User | None] = relationship(back_populates="documents")
@@ -90,9 +110,13 @@ class Chunk(Base):
         UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), index=True
     )
     page: Mapped[int] = mapped_column(Integer, default=1)
+    # Human-readable source position ("Page 3", "Slide 2", "Sheet 'X' rows 5-24",
+    # "Section: ..."). Null for PDFs ingested before migration 0003.
+    location: Mapped[str | None] = mapped_column(String(255), default=None)
     chunk_index: Mapped[int] = mapped_column(Integer, default=0)
     content: Mapped[str] = mapped_column(Text)
     token_estimate: Mapped[int] = mapped_column(Integer, default=0)
+    embedding_model: Mapped[str | None] = mapped_column(String(255), default=None)
     # Populated by a generated column added in migration 0002:
     #   tsv tsvector GENERATED ALWAYS AS (to_tsvector('english', content)) STORED
     embedding = mapped_column(
@@ -102,7 +126,6 @@ class Chunk(Base):
     document: Mapped[Document] = relationship(back_populates="chunks")
 
     __table_args__ = (
-        Index("ix_chunks_tsv", text("tsv"), postgresql_using="gin"),
         Index(
             "ix_chunks_embedding",
             "embedding",
@@ -139,6 +162,8 @@ class Message(TimestampMixin, Base):
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    feedback_rating: Mapped[str | None] = mapped_column(String(8), default=None)  # "up" | "down"
+    feedback_comment: Mapped[str | None] = mapped_column(Text, default=None)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 
@@ -152,11 +177,79 @@ class QueryLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), index=True
     )
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), default=None, index=True
+    )
     question: Mapped[str] = mapped_column(Text)
     model: Mapped[str] = mapped_column(String(255))
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    cached: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     retrieval_ms: Mapped[int] = mapped_column(Integer, default=0)
     llm_ms: Mapped[int] = mapped_column(Integer, default=0)
     total_ms: Mapped[int] = mapped_column(Integer, default=0)
     retrieved_chunk_ids: Mapped[list | None] = mapped_column(JSON, default=None)
+
+
+class RefreshToken(Base):
+    """Opaque refresh tokens, stored hashed. Rotated on use; a replayed token
+    revokes its whole family (theft detection)."""
+
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    family_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), default=_uuid, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+
+
+class AuditLog(Base):
+    """Security-relevant event trail: who did what, to what, from where."""
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), index=True
+    )
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), default=None, index=True)
+    actor_email: Mapped[str | None] = mapped_column(String(320), default=None)
+    action: Mapped[str] = mapped_column(String(64), index=True)
+    resource_type: Mapped[str | None] = mapped_column(String(64), default=None)
+    resource_id: Mapped[str | None] = mapped_column(String(64), default=None)
+    ip: Mapped[str | None] = mapped_column(String(64), default=None)
+    user_agent: Mapped[str | None] = mapped_column(String(512), default=None)
+    detail: Mapped[dict | None] = mapped_column(JSON, default=None)
+
+
+class SemanticCacheEntry(Base):
+    """Cached answer for a semantically-repeated question within one tenant scope.
+    Invalidated wholesale whenever the document corpus changes."""
+
+    __tablename__ = "semantic_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scope_hash: Mapped[str] = mapped_column(String(64), index=True)
+    question: Mapped[str] = mapped_column(Text)
+    question_embedding = mapped_column(
+        Vector(get_settings().embed_dim), nullable=True, default=None
+    )
+    answer: Mapped[str] = mapped_column(Text)
+    citations: Mapped[list | None] = mapped_column(JSON, default=None)
+    methods: Mapped[list | None] = mapped_column(JSON, default=None)
+    model: Mapped[str] = mapped_column(String(255), default="")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    hit_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

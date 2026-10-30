@@ -36,5 +36,7 @@ async def health() -> dict:
         "status": "ok" if (db_ok and llm_ok) else "degraded",
         "components": {"database": "ok" if db_ok else "down", "llm": "ok" if llm_ok else "down"},
         "model": settings.llm_model,
+        "edition": settings.edition,
+        "environment": settings.environment,
         "latency_ms": round((time.time() - started) * 1000),
     }

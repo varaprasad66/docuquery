@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { deleteDocument, fetchDocuments, retryDocument, uploadDocument } from "../api";
+import { deleteDocument, fetchDocuments, importDocumentFromUrl, retryDocument, uploadDocument } from "../api";
 import type { DocRecord } from "../types";
+
+const ACCEPTED_TYPES =
+  "application/pdf,.pdf,.docx,.pptx,.xlsx,.html,.htm,.txt,.md";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -66,6 +69,8 @@ export default function DocumentsPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [urlValue, setUrlValue] = useState("");
+  const [importingUrl, setImportingUrl] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
@@ -110,6 +115,23 @@ export default function DocumentsPage() {
       load();
     } catch (e) {
       setError(`Retry failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const handleImportUrl = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const url = urlValue.trim();
+    if (!url) return;
+    setImportingUrl(true);
+    setError(null);
+    try {
+      await importDocumentFromUrl(url);
+      setUrlValue("");
+      load();
+    } catch (err) {
+      setError(`URL import failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setImportingUrl(false);
     }
   };
 
@@ -159,7 +181,7 @@ export default function DocumentsPage() {
         <input
           ref={fileInput}
           type="file"
-          accept="application/pdf"
+          accept={ACCEPTED_TYPES}
           multiple
           hidden
           onChange={(e) => handleFiles(e.target.files)}
@@ -177,14 +199,32 @@ export default function DocumentsPage() {
               </svg>
             </div>
             <p className="text-sm font-semibold text-slate-800">
-              Drop PDFs here, or click to browse
+              Drop files here, or click to browse
             </p>
             <p className="text-xs text-slate-400">
-              Supports digital and scanned PDFs up to 50 MB · Ingestion with OCR and hybrid pgvector indexing
+              Supports PDF, DOCX, PPTX, XLSX, HTML, TXT and MD up to 50 MB · Ingestion with OCR and hybrid pgvector indexing
             </p>
           </div>
         )}
       </div>
+
+      <form onSubmit={handleImportUrl} className="flex gap-2 mb-6">
+        <input
+          type="url"
+          required
+          value={urlValue}
+          onChange={(e) => setUrlValue(e.target.value)}
+          placeholder="…or import from a URL (https://example.com/report.pdf)"
+          className="flex-1 text-sm border border-slate-300 rounded-lg px-3 py-2.5 bg-white text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+        />
+        <button
+          type="submit"
+          disabled={importingUrl || !urlValue.trim()}
+          className="text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg px-4 py-2.5 transition-colors"
+        >
+          {importingUrl ? "Importing…" : "Import URL"}
+        </button>
+      </form>
 
       {error && (
         <div className="mb-4 rounded-lg bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700 flex items-center justify-between">

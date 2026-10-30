@@ -82,11 +82,18 @@ export default function App() {
       ? "bg-emerald-500"
       : "bg-amber-500";
 
+  const editionLabels: Record<string, { name: string; badge: string }> = {
+    basic: { name: "Starter", badge: "bg-slate-100 text-slate-700 border-slate-200" },
+    professional: { name: "Professional", badge: "bg-sky-50 text-sky-700 border-sky-200" },
+    enterprise: { name: "Enterprise", badge: "bg-violet-50 text-violet-700 border-violet-200" },
+  };
+  const edition = health?.edition ? editionLabels[health.edition] ?? editionLabels.enterprise : null;
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50/40 text-slate-800">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4">
-          <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white grid place-items-center font-bold text-sm shadow-xs">
               DQ
             </div>
@@ -96,6 +103,14 @@ export default function App() {
                 Local-first Document Intelligence (RAG + OCR)
               </p>
             </div>
+            {edition && (
+              <span
+                title={`Licensed edition: ${health?.edition}`}
+                className={`ml-1 px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wide ${edition.badge}`}
+              >
+                {edition.name}
+              </span>
+            )}
           </div>
 
           <nav className="ml-6 flex gap-1">

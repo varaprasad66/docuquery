@@ -18,6 +18,7 @@ export interface Citation {
   document_id: string;
   document_name: string;
   page: number;
+  location?: string | null;
   snippet: string;
 }
 

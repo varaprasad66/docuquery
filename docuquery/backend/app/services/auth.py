@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 import logging
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import bcrypt
 import jwt
@@ -30,7 +30,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def create_access_token(user_id: UUID | str, email: str) -> str:
-    """Create a signed JWT access token for a user."""
+    """Create a signed JWT access token for a user. Carries a jti so it can be revoked."""
     settings = get_settings()
     now = datetime.now(timezone.utc)
     expires = now + timedelta(minutes=settings.jwt_expires_minutes)
@@ -38,6 +38,8 @@ def create_access_token(user_id: UUID | str, email: str) -> str:
     payload = {
         "sub": str(user_id),
         "email": email,
+        "jti": uuid4().hex,
+        "typ": "access",
         "iat": int(now.timestamp()),
         "exp": int(expires.timestamp()),
     }

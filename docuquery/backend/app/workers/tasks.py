@@ -1,16 +1,17 @@
-"""Background document processing: parse -> OCR fallback -> chunk -> embed -> store."""
+"""Background document processing: parse (any supported format) -> OCR fallback
+for PDFs -> chunk -> embed -> store."""
 
 import logging
-from pathlib import Path
 import time
 import uuid as uuidlib
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
 from app.db.models import Chunk, Document, DocumentStatus
-from app.services import pdf as pdf_service
+from app.services import parsers
 from app.services.chunker import chunk_text, estimate_tokens
 from app.services.embeddings import embed_texts_sync
 from app.workers.celery_app import celery_app
@@ -67,32 +68,44 @@ def process_document_core(document_id: str) -> None:
         doc.progress = 0.05
         db.commit()
 
-        # 1. Parse pages (with live progress callback: 0.05 -> 0.35)
+        # Resolve the parser by extension; fall back to content sniffing for
+        # legacy rows whose original_name carries no usable suffix.
+        ext = Path(doc.original_name).suffix.lower()
+        if ext not in parsers.PARSERS:
+            kind = parsers.sniff_kind_bytes(pdf_path.read_bytes())
+            ext = parsers.stored_extension_for_kind(kind) or ""
+        if ext not in parsers.PARSERS:
+            doc.status = DocumentStatus.failed
+            doc.error = "Unsupported file type."
+            db.commit()
+            return
+
+        # 1. Parse pages/sections (PDF path streams live progress: 0.05 -> 0.35)
         def on_page_progress(current_page: int, total_pages: int):
             if total_pages > 0:
                 pct = 0.05 + 0.30 * (current_page / total_pages)
                 _set_progress(db, doc.id, pct, page_count=total_pages)
 
-        pages = pdf_service.extract_pages(pdf_path, progress_cb=on_page_progress)
-        _set_progress(db, doc.id, 0.35, page_count=len(pages))
-        logger.info("Doc %s: %d pages extracted in %.1fs", document_id, len(pages), time.time() - started)
+        sections = parsers.parse_document(pdf_path, ext, progress_cb=on_page_progress)
+        _set_progress(db, doc.id, 0.35, page_count=len(sections))
+        logger.info("Doc %s: %d sections extracted in %.1fs", document_id, len(sections), time.time() - started)
 
         # 2. Chunk text (0.35 -> 0.45)
-        all_chunks: list[tuple[int, str]] = []
-        for page in pages:
-            if not page.text.strip():
+        all_chunks: list[tuple[int, str, str]] = []
+        for section in sections:
+            if not section.text.strip():
                 continue
             for piece in chunk_text(
-                page.text, settings.chunk_size, settings.chunk_overlap
+                section.text, settings.chunk_size, settings.chunk_overlap
             ):
-                all_chunks.append((page.page, piece))
+                all_chunks.append((section.index, piece, section.location))
 
         _set_progress(db, doc.id, 0.45, chunk_count=len(all_chunks))
         logger.info("Doc %s: %d total chunks generated", document_id, len(all_chunks))
 
         if not all_chunks:
             doc.status = DocumentStatus.failed
-            doc.error = "No extractable text found in this PDF (scanned pages need Tesseract OCR)."
+            doc.error = "No extractable text found in this document (scanned PDFs need Tesseract OCR)."
             db.commit()
             return
 
@@ -103,7 +116,7 @@ def process_document_core(document_id: str) -> None:
 
         for batch_idx, batch_start in enumerate(range(0, len(all_chunks), EMBED_BATCH_SIZE)):
             batch = all_chunks[batch_start : batch_start + EMBED_BATCH_SIZE]
-            batch_texts = [content for _, content in batch]
+            batch_texts = [content for _, content, _location in batch]
 
             vectors = None
             if embeddings_service_available:
@@ -122,15 +135,17 @@ def process_document_core(document_id: str) -> None:
             else:
                 vectors = [None] * len(batch)
 
-            for (page_no, content), vector in zip(batch, vectors):
+            for (page_no, content, location), vector in zip(batch, vectors, strict=False):
                 chunk_rows.append(
                     Chunk(
                         document_id=doc.id,
                         page=page_no,
+                        location=location,
                         chunk_index=len(chunk_rows),
                         content=content,
                         token_estimate=estimate_tokens(content),
                         embedding=vector,
+                        embedding_model=settings.embeddings_model if vector is not None else None,
                     )
                 )
 
@@ -150,10 +165,10 @@ def process_document_core(document_id: str) -> None:
             db.commit()
 
         logger.info(
-            "Doc %s ready: %d chunks across %d pages processed in %.1fs",
+            "Doc %s ready: %d chunks across %d sections processed in %.1fs",
             document_id,
             len(chunk_rows),
-            len(pages),
+            len(sections),
             time.time() - started,
         )
 
@@ -169,7 +184,26 @@ def process_document_core(document_id: str) -> None:
         except Exception as inner_exc:
             logger.error("Failed to update failed status in DB: %s", inner_exc)
     finally:
+        # The corpus changed: cached answers may reference outdated content.
+        _invalidate_answer_cache(db)
         db.close()
+
+
+def _invalidate_answer_cache(db: Session) -> None:
+    """Corpus changed: drop cached answers so stale content can never be served."""
+    try:
+        from sqlalchemy import delete
+
+        from app.db.models import SemanticCacheEntry
+
+        db.execute(delete(SemanticCacheEntry))
+        db.commit()
+    except Exception as exc:
+        logger.debug("Semantic cache invalidation skipped: %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
 
 @celery_app.task(name="process_document", bind=True, max_retries=1)

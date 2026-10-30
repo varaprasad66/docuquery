@@ -9,6 +9,11 @@ import sys
 backend_dir = Path(__file__).resolve().parent.parent / "backend"
 sys.path.insert(0, str(backend_dir))
 
+# Psycopg's async driver requires the selector event loop on Windows (same
+# requirement as run.py and the integration test harness).
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from app.evals.eval_runner import run_evaluation
 
 if __name__ == "__main__":

@@ -62,7 +62,7 @@ function CitationCard({
         </span>
         <span className="text-xs font-semibold text-slate-800 truncate flex-1">{c.document_name}</span>
         <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
-          Page {c.page}
+          {c.location ?? `Page ${c.page}`}
         </span>
       </div>
       <p className="text-xs text-slate-600 leading-relaxed line-clamp-3 font-normal">{c.snippet}</p>
@@ -397,7 +397,7 @@ export default function ChatPage() {
                   <h4 className="text-sm font-bold text-slate-900 leading-tight">
                     {selectedCitation.document_name}
                   </h4>
-                  <p className="text-[11px] text-slate-500">Page {selectedCitation.page}</p>
+                  <p className="text-[11px] text-slate-500">{selectedCitation.location ?? `Page ${selectedCitation.page}`}</p>
                 </div>
               </div>
               <button

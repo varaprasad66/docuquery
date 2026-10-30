@@ -1,0 +1,312 @@
+================================================================================
+ DOCUQUERY - FEATURES & API REFERENCE (PLAIN TEXT)
+ Version 0.3.0  |  October 2026  |  Editions: Starter / Professional / Enterprise
+ Full detail: see PROJECT_DOCUMENTATION.md in this folder
+================================================================================
+
+ AT A GLANCE
+--------------------------------------------------------------------------------
+ - Fully local, privacy-first RAG document intelligence platform (zero cloud
+   calls by default; default AI = Ollama qwen2.5:3b + nomic-embed-text)
+ - Hybrid retrieval: Postgres full-text (BM25-style) + pgvector HNSW vectors,
+   fused by Reciprocal Rank Fusion (k=60)
+ - Streaming cited chat (SSE) with page-level citations [1][2]
+ - 108 automated tests green (56 unit + 52 integration)
+ - Golden eval (20 Q&A): Hit@1 85% | Hit@3 95% | Hit@6 100% | avg retrieval 8.4 ms
+ - Live end-to-end demo script: 35 checks
+ - 25 REST/SSE endpoints (listed in Part 2)
+ - Default deployment cost: 0 (local models; any OpenAI-compatible provider
+   swappable via env vars)
+
+
+================================================================================
+ PART 1 - IMPLEMENTED FEATURES
+================================================================================
+
+ 1. DOCUMENT INGESTION & PROCESSING
+--------------------------------------------------------------------------------
+ 1.1  PDF upload with defense-in-depth validation: extension check AND
+      "%PDF-" magic-byte sniff, 50 MB size cap (HTTP 413), empty-file
+      rejection (422), 500-page cap.
+ 1.2  Per-page OCR fallback: pages yielding < 32 characters are rasterized
+      at 200 DPI (grayscale, auto-upscaled) and OCR'd with Tesseract
+      (--psm 4); extraction method ("text" | "ocr") recorded per page.
+ 1.3  Paragraph-aware chunking: chunks of max 1000 chars with 150-char
+      overlap; oversized paragraphs hard-split on sentence boundaries;
+      pathological text (URL walls, tables) fixed-windowed.
+ 1.4  Live progress tracking: per-document progress 0..1 persisted at each
+      pipeline stage; UI renders animated progress bar, polls every 1.5 s.
+ 1.5  Resilient indexing: if embedding generation fails partway, remaining
+      chunks are still indexed WITHOUT vectors (keyword search keeps
+      working); failed documents retryable via API/UI button.
+ 1.6  Dual execution modes: Celery task (Redis broker) when USE_CELERY=true,
+      or in-process FastAPI BackgroundTasks by default - same code path.
+ 1.7  Public/private visibility per document (owner/admin can change);
+      guests always upload private.
+ 1.8  Safe deletion: chunks cascade, stored file removed best-effort,
+      audit event written.
+
+ 2. HYBRID RETRIEVAL ENGINE
+--------------------------------------------------------------------------------
+ 2.1  Keyword leg: Postgres full-text search - to_tsquery('english', ...)
+      with OR semantics, ranked by ts_rank_cd over a GENERATED STORED
+      tsvector column with GIN index.
+ 2.2  Semantic leg: pgvector cosine distance over HNSW-indexed vector(768)
+      column; score = 1 - distance.
+ 2.3  Reciprocal Rank Fusion (RRF, k=60) merges both ranked lists; each
+      result tagged with matched_by ["vector"] / ["bm25"].
+ 2.4  Wide candidate pool: each leg contributes up to top_k x 3 candidates
+      before fusion.
+ 2.5  Tenant-scoped by construction: security clause injected into every
+      retrieval SQL statement - users see own + public documents; guests
+      see public + shared guest space. No cross-tenant code path.
+ 2.6  Graceful degradation: vector-leg failure falls back to keyword-only
+      search instead of erroring.
+ 2.7  Default top_k = 6 (search API allows 1-20; chat allows 1-12).
+
+ 3. STREAMING CITED CHAT
+--------------------------------------------------------------------------------
+ 3.1  Server-Sent Events token streaming; event order:
+      meta -> citations -> token... -> done (or sanitized error).
+ 3.2  Page-level citations: model cites as [n]; UI renders each marker as a
+      clickable button opening a Citation Inspector (document name, page
+      number, exact retrieved passage).
+ 3.3  Multi-turn conversations: last 6 history messages (truncated to
+      2000 chars) included as context; conversations created lazily,
+      titled from first question.
+ 3.4  Semantic cache: questions embedded and matched within tenant scope
+      at cosine similarity >= 0.92, TTL 60 minutes; on hit the stored
+      answer + citations are replayed (logged cached=true, no LLM call).
+      Cache is invalidated wholesale whenever the corpus changes.
+ 3.5  Honest failure: stream errors sanitized to a generic user-safe
+      message; details go to server logs only.
+ 3.6  Grounded generation: system prompt forces answers strictly from
+      numbered excerpts with [n] citations and an exact fallback sentence
+      when the answer is not present.
+
+ 4. SECURITY & MULTI-USER FOUNDATION
+--------------------------------------------------------------------------------
+ 4.1  JWT access tokens (HS256, 7-day default) with sub/email/jti/typ
+      claims; jti blacklisted in Redis on logout (TTL = token expiry).
+ 4.2  Rotating refresh tokens: 48-byte opaque, stored only as SHA-256
+      hash, 30-day expiry, family-based rotation; replaying a revoked
+      token revokes the entire token family (theft detection).
+ 4.3  Password policy: min 10 chars with >= 1 letter + 1 digit; bcrypt
+      hashing; timing-equalized invalid-login path; generic errors.
+ 4.4  Login lockout: 5 failed attempts per email/IP -> 15-minute lock
+      (Redis counters, in-memory fallback).
+ 4.5  Sliding-window rate limiting via Redis sorted sets, per user
+      (or IP for guests), bounded in-process LRU fallback; 429 with
+      Retry-After header.
+ 4.6  Tenant isolation: deny-by-default read/mutate checks; foreign
+      private resources return 404 (existence never leaked); covered by
+      dedicated integration regression test.
+ 4.7  Roles: user / admin; ADMIN_EMAILS list grants admin at registration.
+ 4.8  Immutable audit trail: register, login, login_failed, upload,
+      visibility change, delete, admin edits - with actor, IP, user
+      agent, resource type/id, JSON detail; configurable retention.
+ 4.9  Hardened HTTP layer: security headers (nosniff, X-Frame-Options
+      DENY, Referrer-Policy, Permissions-Policy), X-Request-ID
+      propagation, error-sanitizing middleware (unhandled exceptions ->
+      generic 500 + request id).
+ 4.10 Production boot guards: server refuses to start with
+      ENVIRONMENT=production + default JWT secret or DEBUG=true.
+ 4.11 Anonymous-friendly demo mode: invalid/expired tokens degrade to
+      guest identity (public documents only).
+
+ 5. ANALYTICS & OBSERVABILITY
+--------------------------------------------------------------------------------
+ 5.1  Scoped analytics: admin = global, user = own, guest = guest scope.
+ 5.2  KPIs: documents (total/ready/failed/pages), chunks, queries,
+      average latency with retrieval vs generation split, token usage
+      with estimated cost (per-model pricing), cache hit rate, feedback
+      tallies.
+ 5.3  14-day daily usage series (Professional/Enterprise editions).
+ 5.4  Recent query log: question, model, retrieval/LLM/total ms, tokens,
+      timestamp, cached flag.
+ 5.5  Health endpoint: DB SELECT 1 + LLM endpoint probes, per-component
+      status, edition, environment, latency; UI health pill polls every
+      30 s.
+
+ 6. COMMERCIAL EDITIONS (single codebase, EDITION env var)
+--------------------------------------------------------------------------------
+      Lower editions receive 404 (not 403) for higher-tier surfaces.
+      Security fundamentals ship in EVERY edition.
+
+      Capability                                  Starter Prof  Ent
+      ----------------------------------------------------------------
+      Upload, OCR, hybrid retrieval, cited chat     Y     Y    Y
+      JWT auth, refresh rotation, lockout, limits  Y     Y    Y
+      Audit trail                                   Y     Y    Y
+      Message feedback (up/down + comment)          -     Y    Y
+      Daily usage analytics + quotas                -     Y    Y
+      Admin console (users/docs/audit/overview)     -     -    Y
+
+ 7. MODEL-AGNOSTIC AI LAYER
+--------------------------------------------------------------------------------
+ 7.1  Default stack (fully offline, zero API cost):
+      - Generation: Ollama qwen2.5:3b (temperature 0.2, max 1024 tokens)
+      - Embeddings: Ollama nomic-embed-text (768 dimensions)
+ 7.2  Any OpenAI-compatible provider swappable via env vars (OpenAI,
+      Z.ai GLM, Azure OpenAI, vLLM, LM Studio, ...) without code changes.
+ 7.3  Embedding dimension validated against EMBED_DIM at call time -
+      loud failure on mismatch, never silent index corruption.
+
+
+================================================================================
+ PART 2 - API CATALOG (25 endpoints)
+================================================================================
+ Base URL: http://localhost:8100   |   OpenAPI docs: /docs
+ Auth: Authorization: Bearer <access_token> unless noted
+ Access tags: [Public] [Auth] [Guest-ok] [Prof+] [Ent-Admin]
+
+ HEALTH (1)
+--------------------------------------------------------------------------------
+ GET   /api/health                          Liveness + DB/LLM component
+                                            probes. [Public]
+
+ AUTH - /api/auth (5)
+--------------------------------------------------------------------------------
+ POST  /api/auth/register                   Create account (201). Password
+                                            policy enforced. ADMIN_EMAILS
+                                            become admins. Returns token
+                                            pair + user. [Public]
+ POST  /api/auth/login                      Issue token pair. Lockout-
+                                            gated (5 fails -> 15 min).
+                                            [Public]
+ POST  /api/auth/refresh                    Rotate refresh token; replay
+                                            of revoked token revokes the
+                                            whole family. [Public]
+ POST  /api/auth/logout                     Revoke refresh token; blacklist
+                                            access-token jti. 204. [Auth]
+ GET   /api/auth/me                         Current user profile. [Auth]
+
+ DOCUMENTS - /api/documents (6)
+--------------------------------------------------------------------------------
+ POST  /api/documents                       Upload PDF (multipart file,
+                                            query visibility=private|public).
+                                            Magic-byte + size + quota
+                                            checks. 201, status=processing.
+                                            [Guest-ok]
+ GET   /api/documents                       List own + public documents
+                                            (guests: public + guest space).
+                                            [Guest-ok]
+ GET   /api/documents/{id}                  Document detail incl. status,
+                                            progress, page/chunk counts.
+                                            Foreign private -> 404.
+                                            [Guest-ok]
+ PATCH /api/documents/{id}/visibility       Change private/public.
+                                            Owner/admin only.
+ POST /api/documents/{id}/retry             Re-queue failed/stuck doc.
+                                            Owner/admin only.
+ DELETE /api/documents/{id}                 Delete doc; chunks cascade;
+                                            file removed. 204.
+                                            Owner/admin only.
+
+ SEARCH (1)
+--------------------------------------------------------------------------------
+ POST  /api/search                          Hybrid retrieval without
+                                            generation. Body:
+                                            {query (max 2000 chars),
+                                             top_k 1-20 default 6,
+                                             document_ids? (max 25)}.
+                                            Returns chunk_id, document,
+                                            page, snippet (280 chars),
+                                            score, matched_by[], methods[],
+                                            took_ms. [Guest-ok]
+
+ CHAT & CONVERSATIONS - /api (5)
+--------------------------------------------------------------------------------
+ POST  /api/chat                            STREAMING (SSE). Body:
+                                            {question (max 4000 chars),
+                                             conversation_id?,
+                                             top_k 1-12 default 6,
+                                             document_ids?}.
+                                            Daily quota enforced (429).
+                                            [Guest-ok]
+ GET   /api/conversations                   List own conversations with
+                                            message counts. [Auth]
+ GET   /api/conversations/{id}              Ordered messages incl.
+                                            citations, latency, feedback.
+                                            [Auth]
+ DELETE /api/conversations/{id}             Delete conversation. 204.
+                                            [Auth]
+ POST  /api/messages/{id}/feedback          Rate assistant message
+                                            {rating: "up"|"down",
+                                             comment?}. 204. [Prof+]
+
+ ANALYTICS (1)
+--------------------------------------------------------------------------------
+ GET   /api/stats                           Scoped KPIs: documents/chunks/
+                                            queries, latency split,
+                                            tokens + cost, 15 recent
+                                            queries, cache hit rate,
+                                            feedback tallies, 14-day
+                                            series (Prof+). [Guest-ok]
+
+ ADMINISTRATION - /api/admin (6)  [Ent-Admin: enterprise edition + admin role]
+--------------------------------------------------------------------------------
+ GET   /api/admin/users                     Last 500 users.
+ PATCH /api/admin/users/{id}                Toggle active/role/display
+                                            name (cannot disable self);
+                                            audited.
+ GET   /api/admin/documents                 All documents, optional
+                                            status filter.
+ POST  /api/admin/documents/{id}/reprocess  Force re-ingestion.
+ GET   /api/admin/audit                     Audit trail, optional action
+                                            filter, limit 1-500.
+ GET   /api/admin/overview                  Global counts: users
+                                            (total/active), documents
+                                            (total/failed), audit events.
+
+ CHAT SSE EVENT REFERENCE
+--------------------------------------------------------------------------------
+ meta      {conversation_id, retrieval_ms, methods[], cached}
+ citations [ {n, document_id, document_name, page, snippet} ... ]
+ token     {delta}                       (repeated for each token)
+ done      {message_id, prompt_tokens, completion_tokens, latency_ms}
+ error     sanitized user-safe message
+
+
+================================================================================
+ PART 3 - OPERATIONAL DEFAULTS (RELATED TO THE API)
+================================================================================
+
+ RATE LIMITS (per 60 s sliding window; 429 + Retry-After on exceed)
+--------------------------------------------------------------------------------
+ auth: 10     chat: 30     upload: 20     search: 60
+
+ LOGIN LOCKOUT
+--------------------------------------------------------------------------------
+ 5 failed attempts (per email/IP) -> 15-minute lock (900 s)
+
+ DAILY QUOTAS (Professional tier; 0 = unlimited by default)
+--------------------------------------------------------------------------------
+ MAX_DAILY_QUESTIONS = 0     MAX_UPLOADS_PER_DAY = 0
+
+ UPLOAD LIMITS
+--------------------------------------------------------------------------------
+ 50 MB max size, 500 pages max, PDF only (magic-byte enforced)
+
+ INGESTION PARAMETERS (defaults)
+--------------------------------------------------------------------------------
+ CHUNK_SIZE=1000  CHUNK_OVERLAP=150  OCR_DPI=200  OCR_MIN_CHARS_PER_PAGE=32
+ EMBED_DIM=768  embed batch size 10
+
+ SEMANTIC CACHE (defaults)
+--------------------------------------------------------------------------------
+ enabled, TTL 60 min, similarity threshold 0.92, wholesale invalidation
+ on any corpus change
+
+ AUTH LIFETIMES (defaults)
+--------------------------------------------------------------------------------
+ access token 7 days (10080 min) | refresh token 30 days | HS256
+
+ KEY PORTS (docker compose)
+--------------------------------------------------------------------------------
+ Web UI 5173 | API 8100 | Postgres 5433 | Redis 6379 | Ollama 11434 (host)
+
+================================================================================
+ End of file. Full documentation: PROJECT_DOCUMENTATION.md (same folder).
+ Architecture, security model, testing strategy, runbook: see docs/ index.
+================================================================================

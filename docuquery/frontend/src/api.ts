@@ -89,6 +89,16 @@ export async function retryDocument(id: string): Promise<DocRecord> {
   );
 }
 
+export async function importDocumentFromUrl(url: string): Promise<DocRecord> {
+  return json(
+    await safeFetch(`${BASE}/documents/url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ url }),
+    }),
+  );
+}
+
 export async function deleteDocument(id: string): Promise<void> {
   const res = await safeFetch(`${BASE}/documents/${id}`, {
     method: "DELETE",
@@ -102,6 +112,8 @@ export async function fetchHealth(): Promise<{
   status: string;
   components: Record<string, string>;
   model: string;
+  edition?: string;
+  environment?: string;
 }> {
   try {
     return await json(await safeFetch(`${BASE}/health`));
