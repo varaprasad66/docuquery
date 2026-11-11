@@ -1,0 +1,83 @@
+{
+  "summary": {
+    "total_cases": 3,
+    "answerable_cases": 2,
+    "unanswerable_cases": 1,
+    "false_refusal_rate_pct": 0.0,
+    "correct_refusal_rate_pct": 100.0,
+    "answer_keyword_recall_pct": 0.0,
+    "citation_page_hit_rate_pct": 100.0,
+    "unverified_answers": 1,
+    "refusal_reasons": {
+      "ok": 2,
+      "verifier_rejected": 1
+    },
+    "latency_ms_p50": 1951.0,
+    "latency_ms_p95": 6361.0
+  },
+  "cases": [
+    {
+      "id": "a1",
+      "question": "How many annual leave days do employees get per year?",
+      "answerable": true,
+      "refused": false,
+      "reason": "ok",
+      "unverified": false,
+      "keywords_hit": [],
+      "keywords_total": 2,
+      "cited_pages": [
+        1
+      ],
+      "page_hit": true,
+      "wall_ms": 6361,
+      "latency_ms": 4289,
+      "prompt_tokens": 730,
+      "completion_tokens": 48,
+      "chunk_ids": [
+        "f05424fc-a219-4dd4-af06-cd672b8d365e"
+      ]
+    },
+    {
+      "id": "a2",
+      "question": "Within how many days must supplier invoices be paid?",
+      "answerable": true,
+      "refused": false,
+      "reason": "ok",
+      "unverified": false,
+      "keywords_hit": [],
+      "keywords_total": 1,
+      "cited_pages": [
+        2
+      ],
+      "page_hit": true,
+      "wall_ms": 1951,
+      "latency_ms": 926,
+      "prompt_tokens": 714,
+      "completion_tokens": 39,
+      "chunk_ids": [
+        "57c8b901-c258-4f1e-9f8a-84e95ca1bbed"
+      ]
+    },
+    {
+      "id": "u1",
+      "question": "What is the company's policy on parental leave?",
+      "answerable": false,
+      "refused": true,
+      "reason": "verifier_rejected",
+      "unverified": true,
+      "keywords_hit": [],
+      "keywords_total": 0,
+      "cited_pages": [
+        1
+      ],
+      "page_hit": null,
+      "wall_ms": 2151,
+      "latency_ms": 1114,
+      "prompt_tokens": 742,
+      "completion_tokens": 69,
+      "chunk_ids": [
+        "f05424fc-a219-4dd4-af06-cd672b8d365e"
+      ]
+    }
+  ]
+}
