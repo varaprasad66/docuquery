@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { deleteDocument, fetchDocuments, importDocumentFromUrl, retryDocument, uploadDocument } from "../api";
+import { deleteDocument, fetchConfig, fetchDocuments, importDocumentFromUrl, retryDocument, uploadDocument } from "../api";
 import type { DocRecord } from "../types";
 
 const ACCEPTED_TYPES =
@@ -65,6 +65,8 @@ function StatusBadge({
 }
 
 export default function DocumentsPage() {
+  const [config, setConfig] = useState({ max_upload_mb: 10, url_import_enabled: false });
+  useEffect(() => { fetchConfig().then(setConfig).catch(() => undefined); }, []);
   const [docs, setDocs] = useState<DocRecord[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -202,13 +204,13 @@ export default function DocumentsPage() {
               Drop files here, or click to browse
             </p>
             <p className="text-xs text-slate-400">
-              Supports PDF, DOCX, PPTX, XLSX, HTML, TXT and MD up to 50 MB · Ingestion with OCR and hybrid pgvector indexing
+              Supports PDF, DOCX, PPTX, XLSX, HTML, TXT and MD up to {config.max_upload_mb} MB · Searchable text and scanned PDFs
             </p>
           </div>
         )}
       </div>
 
-      <form onSubmit={handleImportUrl} className="flex gap-2 mb-6">
+      {config.url_import_enabled && <form onSubmit={handleImportUrl} className="flex gap-2 mb-6">
         <input
           type="url"
           required
@@ -224,7 +226,7 @@ export default function DocumentsPage() {
         >
           {importingUrl ? "Importing…" : "Import URL"}
         </button>
-      </form>
+      </form>}
 
       {error && (
         <div className="mb-4 rounded-lg bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700 flex items-center justify-between">

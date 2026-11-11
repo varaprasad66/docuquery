@@ -9,12 +9,14 @@
  *   npx playwright test
  */
 import { expect, test } from "@playwright/test";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const UNIQUE = Date.now();
 
 test("login, upload, and chat with a citation", async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(60_000);
 
   await page.goto("/");
 
@@ -38,8 +40,8 @@ test("login, upload, and chat with a citation", async ({ page }) => {
     'input[type="file"]',
     join(__dirname, "fixtures", "handbook-sample.pdf"),
   );
-  await expect(page.getByText(/^Ready/).first()).toBeVisible({
-    timeout: 120_000,
+  await expect(page.getByText("Ready", { exact: true }).first()).toBeVisible({
+    timeout: 30_000,
   });
 
   // --- Chat and expect a cited answer ---
@@ -49,8 +51,16 @@ test("login, upload, and chat with a citation", async ({ page }) => {
     .fill("How many annual leave days do I get per year?");
   await page.keyboard.press("Enter");
 
-  await expect(page.getByText(/25/).first()).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByText(/25/).first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("handbook-sample.pdf").first()).toBeVisible({
     timeout: 30_000,
   });
+  await page.screenshot({ path: "test-results/chat-desktop.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: "test-results/chat-mobile.png", fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.getByRole("button", { name: "Sign Out" }).click();
+  await expect(page.getByRole("button", { name: "Sign In", exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Sign In", exact: true })).toBeVisible();
 });

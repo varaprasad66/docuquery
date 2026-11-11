@@ -1,0 +1,24 @@
+NORTHSTAR DEMO HANDBOOK
+Synthetic sample data for DocuQuery verification. Not a real company's policy.
+
+1. Leave
+Employees receive 25 days of annual leave per calendar year. Up to 5 unused days
+may carry over. Carried-over days expire on March 31 of the following year.
+
+2. Working arrangements
+Employees may work remotely up to 3 days per week with their manager's approval.
+Core working hours are 10:00 to 15:00 in the employee's local time zone.
+
+3. Equipment and expenses
+The equipment allowance is USD 600 per employee per year. Submit expense claims
+within 30 days of purchase, with the original receipt.
+
+4. Learning
+The training budget is USD 1,000 per employee per year.
+
+5. Security
+Report suspected security incidents within one hour through the internal security
+hotline. Access reviews are performed quarterly.
+
+6. Support
+Customer support operates Monday through Friday, 09:00 to 17:00 UTC.

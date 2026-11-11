@@ -1,16 +1,21 @@
 """Authorization helpers: deny-by-default access decisions for documents.
 
 Access rules:
-- read:    owner, admin, public-visibility documents, or legacy unowned (public) docs
+- read:    owner, admin, or public-visibility documents
 - mutate:  owner or admin only — never a guest
-- guests:  read public content only; any mutation -> 401
+- guests:  read explicitly public content only; any mutation -> 401
 - private documents of other users return 404 (existence is not leaked)
+
+There is no shared "guest space": documents with no owner are treated like any
+other private document — invisible to guests and to other tenants. Guest
+surface = explicitly public documents (read-only).
 """
 
 from uuid import UUID
 
 from fastapi import HTTPException, status
 
+from app.config import get_settings
 from app.db.models import Document, DocumentVisibility, User, UserRole
 
 
@@ -22,20 +27,14 @@ def _is_public(doc: Document) -> bool:
     return doc.visibility == DocumentVisibility.public.value
 
 
-def _is_guest_space(doc: Document) -> bool:
-    """Unowned private documents = guest uploads. Visible to guests (their space)
-    and admins only — never to other authenticated tenants."""
-    return doc.owner_id is None
-
-
 def can_read(user: User | None, doc: Document) -> bool:
     if is_admin(user):
         return True
-    if _is_public(doc):
+    if get_settings().public_document_sharing_enabled and _is_public(doc):
         return True
-    if _is_guest_space(doc):
-        return user is None
-    return user is not None and doc.owner_id == user.id
+    if user is None:
+        return False
+    return doc.owner_id == user.id
 
 
 def can_mutate(user: User | None, doc: Document) -> bool:
@@ -65,10 +64,11 @@ def scope_clause(owner_id: UUID | None) -> str:
     """SQL fragment (with named binds :owner_id) limiting retrieval to documents the
     requester may see. Used by every retrieval query — the tenant-isolation control.
 
-    Guest scope = public documents + the "guest space" (unowned documents, which
-    includes guest uploads and the seeded demo corpus). Authenticated users never
-    match the unowned branch, so guest uploads stay invisible to accounts.
+    Guest scope = explicitly public documents only. Unowned documents are not a
+    shared guest space; a guest never matches them.
     """
+    if not get_settings().public_document_sharing_enabled:
+        return "FALSE" if owner_id is None else "d.owner_id = CAST(:owner_id AS uuid)"
     if owner_id is None:
-        return "(d.visibility = 'public' OR d.owner_id IS NULL)"
+        return "d.visibility = 'public'"
     return "(d.owner_id = CAST(:owner_id AS uuid) OR d.visibility = 'public')"

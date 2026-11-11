@@ -113,7 +113,8 @@ async def retrieve(
             ORDER BY c.embedding <=> CAST(:qvec AS vector)
             LIMIT :k
             """  # nosec B608 - binds-only interpolation, see doc_filter note
-        rows = await db.execute(text(vector_sql), binds)
+        async with db.begin_nested():
+            rows = await db.execute(text(vector_sql), binds)
         for row in rows:
             vector_hits.append(
                 Source(

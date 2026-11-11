@@ -54,6 +54,9 @@ function CitationCard({
   return (
     <div
       onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onClick(); } }}
       className="border border-slate-200 hover:border-indigo-300 rounded-lg p-3 bg-white hover:bg-indigo-50/20 cursor-pointer transition-all shadow-xs"
     >
       <div className="flex items-center gap-2 mb-1.5">
@@ -168,6 +171,7 @@ export default function ChatPage() {
               m.id === assistantId
                 ? {
                     ...m,
+                    id: ev.message_id ?? m.id,
                     streaming: false,
                     latency_ms: ev.latency_ms,
                     prompt_tokens: ev.prompt_tokens,
@@ -212,7 +216,7 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 grid grid-cols-[250px_1fr] gap-6 h-[calc(100vh-73px)]">
+    <div className="max-w-6xl mx-auto px-4 py-6 grid grid-cols-1 md:grid-cols-[250px_1fr] gap-6 h-[calc(100vh-73px)]">
       {/* Sidebar */}
       <aside className="flex flex-col min-h-0 bg-white border border-slate-200 rounded-xl p-3 shadow-xs">
         <button

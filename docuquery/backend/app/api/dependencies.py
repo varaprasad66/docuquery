@@ -5,10 +5,9 @@ import logging
 import uuid as uuidlib
 
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import User
-from app.db.session import SessionLocal, get_db
+from app.db.session import SessionLocal
 from app.services.auth import decode_access_token
 from app.services.rate_limit import rate_limit_dependency
 from app.services.token_store import token_blacklist
@@ -17,24 +16,37 @@ logger = logging.getLogger(__name__)
 
 API_KEY_PREFIX = "dq_"
 
+INVALID_CREDENTIALS = HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Invalid or expired session. Please sign in again.",
+    headers={"WWW-Authenticate": "Bearer"},
+)
 
-async def _user_from_jwt(token: str) -> User | None:
+
+async def _user_from_jwt(token: str) -> User:
+    """Resolve a bearer JWT to an active user.
+
+    Supplied-but-invalid credentials (malformed, tampered, expired, revoked,
+    unknown or deactivated user) are an authentication failure — 401 — never a
+    silent downgrade to guest access."""
     payload = decode_access_token(token)
     if not payload or "sub" not in payload:
-        return None
+        raise INVALID_CREDENTIALS
     jti = payload.get("jti")
     if jti and token_blacklist.is_revoked(jti):
-        return None
+        raise INVALID_CREDENTIALS
     try:
         user_id = uuidlib.UUID(payload["sub"])
         async with SessionLocal() as db:
             user = await db.get(User, user_id)
             if user is None or not user.is_active:
-                return None
+                raise INVALID_CREDENTIALS
             return user
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.debug("Failed to resolve user from token: %s", exc)
-        return None
+        raise INVALID_CREDENTIALS from exc
 
 
 async def get_current_user_optional(
@@ -46,14 +58,15 @@ async def get_current_user_optional(
     - API key (dq_-prefixed bearer): (user, [scopes]); unknown or revoked keys
       fail CLOSED with 401 — a programmatic client must never silently
       downgrade to guest access.
-    - Missing header: (None, None) — guest/demo mode.
+    - Missing header: (None, None) — guest (public read-only surfaces only).
+    - Supplied but invalid credentials of any kind: 401. Never guest fallback.
     """
     if not authorization:
         return None, None
 
     parts = authorization.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
-        return None, None
+        raise INVALID_CREDENTIALS
     token = parts[1]
 
     if token.startswith(API_KEY_PREFIX):
@@ -135,7 +148,7 @@ async def require_jwt_session(
     return user
 
 
-async def get_admin_user(user: User = Depends(get_current_user)) -> User:
+async def get_admin_user(user: User = Depends(require_jwt_session)) -> User:
     """Require an authenticated admin. Non-admins receive 404 (surface exists but is
     not advertised)."""
     from app.db.models import UserRole

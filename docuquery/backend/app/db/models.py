@@ -340,3 +340,9 @@ class SemanticCacheEntry(Base):
         DateTime(timezone=True), server_default=text("now()")
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class StorageCleanup(TimestampMixin, Base):
+    __tablename__ = "storage_cleanup"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    locator: Mapped[str] = mapped_column(String(1024))

@@ -43,7 +43,7 @@ def _configure_tesseract() -> str | None:
                 pytesseract.pytesseract.tesseract_cmd = candidate
                 return candidate
             except Exception:
-                pass
+                logger.debug("Optional PDF metadata could not be read", exc_info=True)
     return None
 
 
@@ -112,7 +112,7 @@ def extract_pages(
                 try:
                     progress_cb(page_no, total)
                 except Exception:
-                    pass
+                    logger.debug("Optional PDF operation failed", exc_info=True)
 
     return pages
 

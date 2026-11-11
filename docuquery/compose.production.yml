@@ -1,0 +1,54 @@
+# Standalone production stack: docker compose -f compose.production.yml ...
+# Terminate HTTPS at the host's load balancer, forwarding to 127.0.0.1:8080.
+x-app: &app
+  image: docuquery-api:${RELEASE_TAG:-candidate}
+  build: ./backend
+  env_file: .env.production
+  restart: unless-stopped
+  init: true
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  environment:
+    ENVIRONMENT: production
+    DEBUG: "False"
+    HTTPS_ENABLED: "True"
+    USE_CELERY: "True"
+    STORAGE_BACKEND: supabase
+    CACHE_ENABLED: "False"
+    URL_IMPORT_ENABLED: "False"
+    REGISTRATION_ENABLED: "False"
+    INTEGRATIONS_ENABLED: "False"
+    MAX_UPLOAD_MB: "10"
+    MAX_DAILY_QUESTIONS: "20"
+    MAX_UPLOADS_PER_DAY: "10"
+    DB_POOL_SIZE: "3"
+    DB_MAX_OVERFLOW: "1"
+
+services:
+  migrate:
+    <<: *app
+    command: alembic upgrade head
+    restart: "no"
+    profiles: [release]
+  backend:
+    <<: *app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8100
+    healthcheck:
+      test: [CMD, curl, --fail, --max-time, "5", "http://localhost:8100/api/health/ready"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+  worker:
+    <<: *app
+    command: celery -A app.workers.celery_app worker -l info --concurrency=2
+  scheduler:
+    <<: *app
+    command: celery -A app.workers.celery_app beat -l info --schedule=/tmp/celerybeat-schedule
+  frontend:
+    image: docuquery-web:${RELEASE_TAG:-candidate}
+    build: ./frontend
+    restart: unless-stopped
+    ports: ["127.0.0.1:8080:80"]
+    depends_on:
+      backend:
+        condition: service_healthy

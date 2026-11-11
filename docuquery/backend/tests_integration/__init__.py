@@ -29,15 +29,17 @@ _TEST_UPLOAD_DIR = Path(tempfile.gettempdir()) / "docuquery_test_uploads"
 os.environ["UPLOAD_DIR"] = str(_TEST_UPLOAD_DIR)
 
 TEST_DATABASE_URL = (
-    f"postgresql+psycopg://docuquery:docuquery@localhost:5433/{TEST_DB_NAME}"
+    f"postgresql+psycopg://docuquery:docuquery@127.0.0.1:5433/{TEST_DB_NAME}"
 )
-SERVER_DATABASE_URL = "postgresql+psycopg://docuquery:docuquery@localhost:5433/docuquery"
+SERVER_DATABASE_URL = "postgresql+psycopg://docuquery:docuquery@127.0.0.1:5433/docuquery"
 
 # Must be set before ANY app module is imported (config caches the URL).
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["ENVIRONMENT"] = "local"
 os.environ["EDITION"] = "enterprise"
 os.environ["CACHE_ENABLED"] = "True"
+os.environ["URL_IMPORT_ENABLED"] = "True"
+os.environ["JWT_SECRET"] = "test-only-secret-at-least-thirty-two-bytes-long"
 
 import hashlib  # noqa: E402
 import io  # noqa: E402
@@ -268,14 +270,18 @@ def patch_embeds_everywhere() -> None:
 class IntegrationTestCase(unittest.IsolatedAsyncioTestCase):
     """Base: fresh HTTP client per test against the real app + test DB."""
 
+    loop_factory = asyncio.SelectorEventLoop if sys.platform == "win32" else None
+
     async def asyncSetUp(self):
         if not SCHEMA_READY:
-            self.skipTest(f"Test database unavailable: {_BOOTSTRAP_ERROR}")
+            self.fail(f"Mandatory test database unavailable: {_BOOTSTRAP_ERROR}")
         import httpx
         from sqlalchemy import text
 
         from app.db.session import engine
 
+        if engine.url.database != TEST_DB_NAME or engine.url.host not in ("localhost", "127.0.0.1"):
+            raise RuntimeError("Refusing test cleanup outside the disposable local database")
         force_memory_backends()
         patch_ai_fakes()
         patch_embeds_everywhere()

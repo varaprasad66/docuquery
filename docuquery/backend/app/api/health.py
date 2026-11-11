@@ -40,3 +40,38 @@ async def health() -> dict:
         "environment": settings.environment,
         "latency_ms": round((time.time() - started) * 1000),
     }
+
+
+@router.get("/live")
+async def liveness():
+    return {"status": "ok"}
+
+
+@router.get("/ready")
+async def readiness():
+    from fastapi.responses import JSONResponse
+    from redis.asyncio import Redis
+    import asyncio
+    components = {}
+    try:
+        async with SessionLocal() as db:
+            await asyncio.wait_for(db.execute(text("SELECT 1")), timeout=3)
+        components["database"] = "ok"
+    except Exception:
+        components["database"] = "down"
+    if get_settings().use_celery:
+        try:
+            async with Redis.from_url(get_settings().redis_url, socket_timeout=3, socket_connect_timeout=3) as redis:
+                await redis.ping()
+            components["broker"] = "ok"
+        except Exception:
+            components["broker"] = "down"
+    ready = all(value == "ok" for value in components.values())
+    return JSONResponse({"status": "ready" if ready else "unavailable", "components": components}, status_code=200 if ready else 503)
+
+
+@router.get("/config")
+async def public_configuration():
+    s = get_settings()
+    return {"max_upload_mb": s.max_upload_mb, "url_import_enabled": s.url_import_enabled,
+            "registration_enabled": s.registration_enabled, "integrations_enabled": s.integrations_enabled}

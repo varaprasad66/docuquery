@@ -45,7 +45,18 @@ class Settings(BaseSettings):
     embed_dim: int = 768
 
     # Infrastructure
-    database_url: str = "postgresql+psycopg://docuquery:docuquery@localhost:5433/docuquery"
+    database_url: str = "postgresql+psycopg://docuquery:docuquery@127.0.0.1:5433/docuquery"
+    migration_database_url: str | None = None
+    db_pool_size: int = 5
+    db_max_overflow: int = 2
+    db_pool_timeout: int = 15
+    storage_backend: str = "local"
+    supabase_url: str = ""
+    supabase_secret_key: str = ""
+    supabase_storage_bucket: str = "documents"
+    public_document_sharing_enabled: bool = False
+    registration_enabled: bool = True
+    integrations_enabled: bool = True
     redis_url: str = "redis://localhost:6379/0"
     use_celery: bool = False  # By default in dev, use in-process BackgroundTasks to avoid hung queues
 
@@ -62,7 +73,7 @@ class Settings(BaseSettings):
     xlsx_rows_per_section: int = 50  # rows per chunk section; header is repeated
 
     # URL import (POST /api/documents/url)
-    url_import_enabled: bool = True
+    url_import_enabled: bool = False
     url_fetch_timeout_seconds: int = 20
 
     # Retrieval quality
@@ -113,8 +124,8 @@ class Settings(BaseSettings):
     password_min_length: int = 10
     login_max_attempts: int = 5
     login_lockout_seconds: int = 900  # 15 minutes
-    # Emails listed here are created with the admin role at registration.
-    admin_emails: list[str] = []
+    # NOTE: there is deliberately no email-allowlist admin registration.
+    # Privilege is provisioned out-of-band by the operator (scripts/promote_admin.py).
 
     # Rate limiting (requests per window, per identity)
     rate_limit_auth: int = 10
@@ -128,7 +139,7 @@ class Settings(BaseSettings):
     max_uploads_per_day: int = 0
 
     # Semantic answer cache (professional edition). Reduces duplicate-question cost.
-    cache_enabled: bool = True
+    cache_enabled: bool = False
     cache_ttl_minutes: int = 60
     cache_similarity_threshold: float = 0.92  # cosine similarity required for a hit
 
@@ -149,7 +160,7 @@ def _validate_production(settings: "Settings") -> None:
     """Refuse to boot a production deployment with insecure configuration."""
     if not settings.is_production:
         return
-    if settings.jwt_secret == "change-me-in-production":
+    if settings.jwt_secret == "change-me-in-production":  # nosec B105 - reject development sentinel
         raise RuntimeError(
             "Refusing to start in production with the default JWT_SECRET. "
             "Set a strong JWT_SECRET in the environment."
@@ -168,7 +179,7 @@ def _validate_production(settings: "Settings") -> None:
             after_scheme = database_url.split("://", 1)[1]
             password = after_scheme.split("@", 1)[0].split(":", 1)[1]
         except IndexError:
-            password = ""
+            password = ""  # nosec B105 - missing credential detection
         if password.strip() in ("", "docuquery", "postgres", "password", "changeme"):
             raise RuntimeError(
                 "Refusing to start in production with a weak/default database "
@@ -187,6 +198,7 @@ def get_settings() -> Settings:
     _validate_production(settings)
     try:
         settings.upload_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+    except OSError:
+        if settings.storage_backend == "local":
+            raise
     return settings

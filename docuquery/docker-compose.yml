@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: docuquery
       POSTGRES_DB: docuquery
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -20,7 +20,7 @@ services:
     image: redis:7-alpine
     container_name: docuquery-redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -36,7 +36,7 @@ services:
       sh -c "alembic upgrade head &&
              uvicorn app.main:app --host 0.0.0.0 --port 8100"
     ports:
-      - "8100:8100"
+      - "127.0.0.1:8100:8100"
     environment:
       - DATABASE_URL=postgresql+psycopg://docuquery:docuquery@db:5432/docuquery
       - REDIS_URL=redis://redis:6379/0
@@ -87,7 +87,7 @@ services:
       dockerfile: Dockerfile
     container_name: docuquery-frontend
     ports:
-      - "5173:80"
+      - "127.0.0.1:5173:80"
     depends_on:
       - backend
 

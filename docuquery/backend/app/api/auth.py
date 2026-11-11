@@ -129,12 +129,15 @@ async def register(
         )
 
     settings = get_settings()
-    is_admin = body.email.lower() in [e.lower() for e in settings.admin_emails]
+    if not settings.registration_enabled:
+        raise HTTPException(403, "Registration is by invitation. Contact the demo owner.")
     user = User(
         email=body.email.lower(),
         password_hash=hash_password(body.password),
         display_name=body.display_name or body.email.split("@")[0],
-        role=UserRole.admin.value if is_admin else UserRole.user.value,
+        # Privilege is never inferred from a user-supplied email. Admins are
+        # provisioned out-of-band by the operator (scripts/promote_admin.py).
+        role=UserRole.user.value,
     )
     db.add(user)
     ip, ua = await client_identity(request)
@@ -209,7 +212,7 @@ async def refresh(
     else:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token.")
     token_hash = _hash_refresh_token(presented)
-    result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+    result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash).with_for_update())
     stored = result.scalar_one_or_none()
 
     if stored is None:
@@ -275,7 +278,7 @@ async def logout(
         token_hash = None
     stored = None
     if token_hash:
-        result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+        result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash).with_for_update())
         stored = result.scalar_one_or_none()
     if stored is not None:
         if stored.revoked:

@@ -10,26 +10,49 @@ from app.db.models import DocumentStatus
 
 
 # --- Auth Schemas ---
+# bcrypt operates on at most 72 BYTES (pyca/bcrypt raises beyond that, which
+# would surface as a 500). Enforce the limit in bytes so long/Unicode passwords
+# fail fast with a clear 422 instead of an unhandled error.
+BCRYPT_MAX_BYTES = 72
+
+
+def _validate_password_bytes(v: str) -> str:
+    used = len(v.encode("utf-8"))
+    if used > BCRYPT_MAX_BYTES:
+        raise ValueError(
+            f"Password is too long: {used} UTF-8 bytes exceeds the {BCRYPT_MAX_BYTES}-byte limit."
+        )
+    return v
+
+
 class UserRegister(BaseModel):
-    email: str = Field(min_length=3, max_length=320, pattern=r"^[^@]+@[^@]+\.[^@]+$")
-    password: str = Field(min_length=1, max_length=128)
+    email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    password: str = Field(min_length=8, max_length=128)
     display_name: str | None = Field(default=None, max_length=120)
 
     @field_validator("password")
     @classmethod
     def password_policy(cls, v: str) -> str:
-        """Minimum length plus at least one letter and one digit."""
+        """Minimum length plus at least one letter and one digit (characters),
+        and a hard UTF-8 byte ceiling matching bcrypt's 72-byte limit."""
         s = get_settings()
         if len(v) < s.password_min_length:
             raise ValueError(f"Password must be at least {s.password_min_length} characters.")
         if not re.search(r"[A-Za-z]", v) or not re.search(r"\d", v):
             raise ValueError("Password must contain at least one letter and one digit.")
-        return v
+        return _validate_password_bytes(v)
 
 
 class UserLogin(BaseModel):
-    email: str = Field(min_length=3, max_length=320)
-    password: str = Field(min_length=1, max_length=128)
+    email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    # 128 characters covers anything bcrypt can meaningfully verify (72 bytes);
+    # longer input is accepted here and simply fails verification (401), never a 500.
+    password: str = Field(min_length=1, max_length=256)
+
+    @field_validator("password")
+    @classmethod
+    def password_bytes(cls, v: str) -> str:
+        return _validate_password_bytes(v)
 
 
 class UserOut(BaseModel):

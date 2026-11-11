@@ -10,16 +10,16 @@ import time
 import uuid as uuidlib
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
-    client_identity,
-    get_current_user_optional_dep,
+    get_current_user,
     rate_limit_chat,
     require_api_key_scope,
+    require_jwt_session,
 )
 from app.api.schemas import (
     ChatRequest,
@@ -96,7 +96,7 @@ async def chat(
     body: ChatRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     settings = get_settings()
     started = time.perf_counter()
@@ -105,9 +105,10 @@ async def chat(
     # Daily question quota (professional edition; 0 = unlimited).
     if user and settings.max_daily_questions > 0:
         midnight = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        await db.execute(select(User.id).where(User.id == user.id).with_for_update())
         count_res = await db.execute(
-            select(func.count(QueryLog.id)).where(
-                QueryLog.owner_id == user.id, QueryLog.created_at >= midnight
+            select(func.count(Message.id)).join(Conversation).where(
+                Conversation.owner_id == user.id, Message.created_at >= midnight, Message.role == "user"
             )
         )
         if int(count_res.scalar_one() or 0) >= settings.max_daily_questions:
@@ -156,18 +157,12 @@ async def chat(
                         document_ids=[str(d) for d in body.document_ids] if body.document_ids else None,
                     )
                     if hit:
+                        assistant = Message(conversation_id=conversation_id, role="assistant", content=hit.answer, citations=hit.citations)
+                        db.add(assistant)
+                        await db.flush()
+                        cached_message_id = str(assistant.id)
                         retrieval_ms = round((time.perf_counter() - started) * 1000)
                         total_ms = retrieval_ms
-                        yield _sse({
-                            "type": "meta",
-                            "conversation_id": str(conversation_id),
-                            "retrieval_ms": retrieval_ms,
-                            "methods": hit.methods or ["cache"],
-                            "cached": True,
-                        })
-                        yield _sse({"type": "citations", "citations": hit.citations})
-                        for piece in [hit.answer[i:i + 24] for i in range(0, len(hit.answer), 24)]:
-                            yield _sse({"type": "token", "value": piece})
                         db.add(
                             QueryLog(
                                 owner_id=owner_id,
@@ -182,17 +177,32 @@ async def chat(
                                 total_ms=total_ms,
                             )
                         )
+                        assistant.prompt_tokens = 0
+                        assistant.completion_tokens = hit.completion_tokens
+                        assistant.latency_ms = total_ms
                         await db.commit()
+                        yield _sse({
+                            "type": "meta",
+                            "conversation_id": str(conversation_id),
+                            "retrieval_ms": retrieval_ms,
+                            "methods": hit.methods or ["cache"],
+                            "cached": True,
+                        })
+                        yield _sse({"type": "citations", "citations": hit.citations})
+                        for piece in [hit.answer[i:i + 24] for i in range(0, len(hit.answer), 24)]:
+                            yield _sse({"type": "token", "value": piece})
                         yield _sse({
                             "type": "done",
                             "prompt_tokens": 0,
                             "completion_tokens": hit.completion_tokens,
                             "latency_ms": total_ms,
+                            "message_id": cached_message_id,
                             "cached": True,
                         })
                         return
                 except Exception:
                     logger.warning("Cache path failed; answering normally", exc_info=True)
+                    await db.rollback()
 
             # --- Retrieval (tenant-scoped, uses the standalone query) ---
             sources, methods = await retrieve(
@@ -298,6 +308,7 @@ async def chat(
             )
             await db.commit()
 
+            saved_message_id = str(assistant_message.id)
             # --- Cache the fresh answer (professional) ---
             if settings.cache_enabled and sources:
                 try:
@@ -315,13 +326,13 @@ async def chat(
 
             yield _sse({
                 "type": "done",
-                "message_id": str(assistant_message.id),
+                "message_id": saved_message_id,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "latency_ms": total_ms,
                 "cached": False,
             })
-        except Exception as exc:  # noqa: BLE001 - stream errors must reach the client
+        except Exception:  # noqa: BLE001 - stream errors must reach the client
             logger.exception("Chat streaming failed")
             await db.rollback()
             # Sanitized error: internals never reach the client.
@@ -337,7 +348,7 @@ async def chat(
 @router.get("/conversations", response_model=list[ConversationOut], dependencies=[Depends(require_api_key_scope("read"))])
 async def list_conversations(
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     base = (
         select(
@@ -367,11 +378,11 @@ async def list_conversations(
     return conversations
 
 
-@router.get("/conversations/{conversation_id}", response_model=list[MessageOut])
+@router.get("/conversations/{conversation_id}", response_model=list[MessageOut], dependencies=[Depends(require_api_key_scope("read"))])
 async def get_conversation(
     conversation_id: uuidlib.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     await _get_owned_conversation(db, conversation_id, user)
     result = await db.execute(
@@ -382,11 +393,11 @@ async def get_conversation(
     return list(result.scalars().all())
 
 
-@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_jwt_session)])
 async def delete_conversation(
     conversation_id: uuidlib.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     conversation = await _get_owned_conversation(db, conversation_id, user)
     await db.delete(conversation)
@@ -396,13 +407,13 @@ async def delete_conversation(
 @router.post(
     "/messages/{message_id}/feedback",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_professional)],
+    dependencies=[Depends(require_professional), Depends(require_jwt_session)],
 )
 async def leave_feedback(
     message_id: uuidlib.UUID,
     body: FeedbackRequest,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     """Rate an assistant answer. Only the conversation owner (or the guest who asked)
     can rate; only assistant messages accept feedback."""

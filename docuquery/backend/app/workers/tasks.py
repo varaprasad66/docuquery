@@ -2,11 +2,14 @@
 for PDFs -> chunk -> embed -> store."""
 
 import logging
+import os
+from functools import lru_cache
+from contextlib import ExitStack
 import time
 import uuid as uuidlib
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, delete, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
@@ -22,10 +25,15 @@ logger = logging.getLogger(__name__)
 EMBED_BATCH_SIZE = 10
 
 
-def _session_factory() -> sessionmaker[Session]:
+@lru_cache(maxsize=4)
+def _process_session_factory(pid: int) -> sessionmaker[Session]:
     settings = get_settings()
-    engine = create_engine(settings.sync_database_url, pool_pre_ping=True)
+    engine = create_engine(settings.sync_database_url, pool_pre_ping=True, pool_size=settings.db_pool_size, max_overflow=settings.db_max_overflow, pool_timeout=settings.db_pool_timeout)
     return sessionmaker(engine, expire_on_commit=False)
+
+
+def _session_factory() -> sessionmaker[Session]:
+    return _process_session_factory(os.getpid())
 
 
 def _set_progress(db: Session, doc_id, progress: float, **fields) -> None:
@@ -51,16 +59,26 @@ def process_document_core(document_id: str) -> None:
     started = time.time()
     db = _session_factory()()
 
+    resources = ExitStack()
+    lock_connection = None
+    lock_id = uuidlib.UUID(document_id).int % (2**63 - 1)
     try:
+        # A dedicated connection holds the session lock across progress commits.
+        # PostgreSQL releases it on worker death, allowing redelivery to recover.
+        lock_connection = db.get_bind().connect()
+        acquired = lock_connection.execute(text("SELECT pg_try_advisory_lock(:id)"), {"id": lock_id}).scalar()
+        if not acquired:
+            return
         doc = db.get(Document, uuidlib.UUID(document_id))
         if doc is None:
             logger.error("Document %s not found", document_id)
             return
 
-        pdf_path = Path(doc.stored_path)
+        from app.services.storage import materialize
+        pdf_path = resources.enter_context(materialize(doc.stored_path))
         if not pdf_path.exists():
             doc.status = DocumentStatus.failed
-            doc.error = f"File not found on disk at {pdf_path}"
+            doc.error = "The source file is unavailable. Please upload it again."
             db.commit()
             return
 
@@ -153,6 +171,7 @@ def process_document_core(document_id: str) -> None:
             _set_progress(db, doc.id, min(progress_val, 0.95))
 
         # 4. Persist chunks & finalize (0.95 -> 1.0)
+        db.execute(delete(Chunk).where(Chunk.document_id == uuidlib.UUID(document_id)))
         for row in chunk_rows:
             db.add(row)
 
@@ -177,14 +196,14 @@ def process_document_core(document_id: str) -> None:
             time.time() - started,
         )
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Processing failed for doc %s", document_id)
         try:
             db.rollback()
             doc = db.get(Document, uuidlib.UUID(document_id))
             if doc is not None:
                 doc.status = DocumentStatus.failed
-                doc.error = f"{type(exc).__name__}: {exc}"[:2000]
+                doc.error = "Document processing failed. Please retry or contact support."
                 db.commit()
                 _fire_webhook(doc.owner_id, "document.failed", {
                     "document_id": str(doc.id),
@@ -197,6 +216,13 @@ def process_document_core(document_id: str) -> None:
         # The corpus changed: cached answers may reference outdated content.
         _invalidate_answer_cache(db)
         db.close()
+        resources.close()
+        if lock_connection is not None:
+            try:
+                lock_connection.execute(text("SELECT pg_advisory_unlock(:id)"), {"id": lock_id})
+                lock_connection.commit()
+            finally:
+                lock_connection.close()
 
 
 def _fire_webhook(owner_id, event: str, payload: dict) -> None:
@@ -223,7 +249,7 @@ def _invalidate_answer_cache(db: Session) -> None:
         try:
             db.rollback()
         except Exception:
-            pass
+            logger.warning("Cache rollback failed", exc_info=True)
 
 
 @celery_app.task(name="process_document", bind=True, max_retries=1)
@@ -238,7 +264,6 @@ def process_extraction_job_core(job_id: str) -> None:
     whose ask_json bridges to the sync OpenAI client via to_thread.
     """
     import asyncio
-    import json as jsonlib
 
     from app.services.extraction import Excerpt, run_extraction_core
     from app.services.llm import sync_llm_client
@@ -306,14 +331,14 @@ def process_extraction_job_core(job_id: str) -> None:
         db.commit()
         logger.info("Extraction job %s completed (%d excerpts)", job_id, len(excerpts))
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Extraction job %s failed", job_id)
         try:
             db.rollback()
             job = db.get(ExtractionJob, uuidlib.UUID(job_id))
             if job is not None:
                 job.status = ExtractionJobStatus.failed
-                job.error = f"{type(exc).__name__}: {exc}"[:2000]
+                job.error = "Extraction failed. Please retry or contact support."
                 db.commit()
         except Exception as inner_exc:
             logger.error("Failed to record extraction failure: %s", inner_exc)
@@ -324,3 +349,35 @@ def process_extraction_job_core(job_id: str) -> None:
 @celery_app.task(name="process_extraction_job", bind=True, max_retries=1)
 def process_extraction_job(self, job_id: str) -> None:
     process_extraction_job_core(job_id)
+
+
+@celery_app.task(name="storage_cleanup")
+def cleanup_storage():
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import select
+    from app.db.models import StorageCleanup
+    from app.services import storage
+    with _session_factory()() as db:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+        rows = db.scalars(select(StorageCleanup).where(StorageCleanup.created_at < cutoff).limit(100)).all()
+        for row in rows:
+            try:
+                referenced = db.scalar(select(Document.id).where(Document.stored_path == row.locator).limit(1))
+                if not referenced:
+                    storage.delete(row.locator)
+                db.delete(row)
+                db.commit()
+            except Exception:
+                db.rollback()
+                logger.warning("Object cleanup will retry", exc_info=True)
+
+
+@celery_app.task(name="recover_ingestion")
+def recover_ingestion():
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import select
+    with _session_factory()() as db:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+        ids = db.scalars(select(Document.id).where(Document.status == DocumentStatus.processing, Document.updated_at < cutoff).limit(100)).all()
+        for doc_id in ids:
+            process_document.delay(str(doc_id))

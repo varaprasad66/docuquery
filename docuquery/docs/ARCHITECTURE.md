@@ -1,3 +1,31 @@
+> Current default: public document sharing is disabled. Ordinary accounts can access only their own documents; guests cannot access documents. Administrators retain privileged access. See the root README for current setup and code map.
+
+# Current managed deployment target (10 November 2026)
+
+React and FastAPI run together behind Render HTTPS. Celery workers and one scheduler
+share a private Redis queue. Supabase PostgreSQL/pgvector stores documents, owners,
+chunks and conversations; a private bucket stores source files. Workers download
+sources into temporary directories, so API and worker need no shared upload disk.
+FastAPI local JWTs enforce ownership; Supabase Auth is not implemented. Alembic owns
+application migrations. This target is prepared, but not yet deployed or verified.
+See deployment.md and verification-results.md for the current release boundary.
+
+```mermaid
+flowchart LR
+  Browser -->|HTTPS| App[React and FastAPI]
+  App --> DB[(Supabase PostgreSQL / pgvector)]
+  App --> Storage[Private source bucket]
+  App --> Queue[Private Redis]
+  Queue --> Worker[Celery worker]
+  Scheduler[Recovery scheduler] --> Queue
+  Worker --> DB
+  Worker --> Storage
+  App --> Model[Language model endpoint]
+  Worker --> Embeddings[Embedding endpoint]
+```
+
+Historical design detail follows; current release records take precedence.
+
 # DocuQuery — System Architecture & RAG Workflow
 
 > **Audience:** clients and technical stakeholders. This document explains how DocuQuery

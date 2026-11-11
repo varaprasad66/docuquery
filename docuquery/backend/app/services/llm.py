@@ -11,12 +11,12 @@ from app.config import get_settings
 
 def llm_client() -> openai.AsyncOpenAI:
     s = get_settings()
-    return openai.AsyncOpenAI(base_url=s.llm_base_url, api_key=s.llm_api_key, max_retries=2)
+    return openai.AsyncOpenAI(base_url=s.llm_base_url, api_key=s.llm_api_key, max_retries=1, timeout=45.0)
 
 
 def sync_llm_client() -> openai.OpenAI:
     s = get_settings()
-    return openai.OpenAI(base_url=s.llm_base_url, api_key=s.llm_api_key, max_retries=2)
+    return openai.OpenAI(base_url=s.llm_base_url, api_key=s.llm_api_key, max_retries=1, timeout=45.0)
 
 
 SYSTEM_PROMPT = """You are DocuQuery, a precise assistant that answers questions strictly from \

@@ -4,12 +4,11 @@ import DocumentsPage from "./pages/Documents";
 import ExtractPage from "./pages/Extract";
 import StatsPage from "./pages/Stats";
 import {
-  clearStoredToken,
+  logoutUser,
   fetchHealth,
+  fetchConfig,
   fetchMe,
-  getStoredToken,
   loginUser,
-  refreshSession,
   registerUser,
 } from "./api";
 import type { User } from "./types";
@@ -21,6 +20,8 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("documents");
   const [health, setHealth] = useState<Health | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+
+  const [features, setFeatures] = useState({ registration_enabled: false, integrations_enabled: false });
 
   // Auth modal state
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -44,19 +45,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // No stored access token: try extending the session via the HttpOnly
-    // refresh cookie before falling back to signed-out state.
-    if (!getStoredToken()) {
-      refreshSession()
-        .then((session) => {
-          if (session) setCurrentUser(session.user);
-        })
-        .catch(() => undefined);
-    }
+    fetchConfig().then(setFeatures).catch(() => undefined);
     refreshHealth();
     refreshUser();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "docuquery_token") refreshUser();
+    };
+    window.addEventListener("storage", onStorage);
     const timer = setInterval(refreshHealth, 30_000);
-    return () => clearInterval(timer);
+    return () => { clearInterval(timer); window.removeEventListener("storage", onStorage); };
   }, [refreshHealth, refreshUser]);
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
@@ -83,9 +80,15 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
-    clearStoredToken();
-    setCurrentUser(null);
+  const handleLogout = async () => {
+    try {
+      await logoutUser();
+      setCurrentUser(null);
+      setTab("documents");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Sign-out failed.");
+      setAuthModalOpen(true);
+    }
   };
 
   const statusColor = !health
@@ -104,7 +107,7 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-slate-50/40 text-slate-800">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white grid place-items-center font-bold text-sm shadow-xs">
               DQ
@@ -125,8 +128,8 @@ export default function App() {
             )}
           </div>
 
-          <nav className="ml-6 flex gap-1">
-            {(["documents", "chat", "extract", "analytics"] as const).map((t) => (
+          <nav aria-label="Main navigation" className="flex flex-wrap gap-1">
+            {(["documents", "chat", ...(features.integrations_enabled ? ["extract", "analytics"] : [])] as Tab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -186,11 +189,10 @@ export default function App() {
         </div>
       </header>
 
-      <main className="flex-1">
-        {tab === "documents" && <DocumentsPage />}
-        {tab === "chat" && <ChatPage />}
-        {tab === "extract" && <ExtractPage />}
-        {tab === "analytics" && <StatsPage />}
+      <main key={currentUser?.id ?? "guest"} className="flex-1">
+        {currentUser ? <SessionPages tab={tab} /> : (
+          <p className="p-8 text-center text-slate-600">Sign in to view your documents and conversations.</p>
+        )}
       </main>
 
       {/* Auth Modal */}
@@ -271,7 +273,7 @@ export default function App() {
               </button>
             </form>
 
-            <div className="mt-4 pt-3 border-t border-slate-100 text-center">
+            {features.registration_enabled && <div className="mt-4 pt-3 border-t border-slate-100 text-center">
               <button
                 onClick={() => {
                   setAuthMode(authMode === "login" ? "register" : "login");
@@ -283,10 +285,21 @@ export default function App() {
                   ? "Don't have an account? Register"
                   : "Already registered? Sign in"}
               </button>
-            </div>
+            </div>}
           </div>
         </div>
       )}
     </div>
   );
+}
+
+// This component is remounted by the account-keyed main element on logout/login.
+function SessionPages({ tab }: { tab: Tab }) {
+  const [visited, setVisited] = useState<Set<Tab>>(() => new Set([tab]));
+  useEffect(() => { setVisited(previous => previous.has(tab) ? previous : new Set([...previous, tab])); }, [tab]);
+  const pages = { documents: DocumentsPage, chat: ChatPage, extract: ExtractPage, analytics: StatsPage };
+  return <>{([...visited] as Tab[]).map(name => {
+    const Page = pages[name];
+    return <div key={name} hidden={tab !== name}><Page /></div>;
+  })}</>;
 }
