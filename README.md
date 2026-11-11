@@ -63,16 +63,6 @@ Uploads are private by default. With `PUBLIC_DOCUMENT_SHARING_ENABLED=False` (th
 
 Access tokens authenticate requests; HttpOnly refresh cookies rotate sessions. Logout clears the UI session. Account changes remount all pages so cached content is discarded. Switching tabs within one account preserves visited pages; processing documents still poll until ready and health checks run periodically.
 
-## Documentation
-
-- [Architecture](docs/ARCHITECTURE.md)
-- [Security](docs/security.md)
-- [Deployment](docs/deployment.md)
-- [Verification](docs/verification-results.md)
-- [Known limitations](docs/known-limitations.md)
-- [Demo walkthrough](docs/demo-script.md)
-
-Historical plans, duplicate overviews and raw logs are preserved in `archives/historical-documents-2026-11-11.zip`. They are reference history, not current operating instructions.
 
 ## Verification commands
 
