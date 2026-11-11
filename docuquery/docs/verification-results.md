@@ -1,3 +1,17 @@
+## Partial-answer and extraction usability follow-up
+
+The generation and evidence prompts now accept supported parts of compound questions and faithful paraphrases. The refusal phrase only suppresses an answer when it is the entire answer, rather than when it appears alongside supported content. Seven grounding unit tests pass. With real local qwen2.5:3b, the user-supplied AI-agent passage produced a cited answer for “what is the ai agents ? how to use them?” and the unrelated largest-country question still produced a refusal with no citations. This check used the supplied passage, not the original PDF or its full retrieval pipeline.
+
+Frontend build passed. A browser test with mocked extraction responses passed for expected fields, missing values, model-confidence labelling, CSV download and stale-result clearing. The extraction model itself was not re-evaluated in that browser test. The current walkthrough is in demo-script.md.
+
+## 2026-11-11 confirmations and evidence checks
+
+- Frontend production build passed. Six Playwright tests passed: one browser confirmation test (mock API, cancel/accept deletion and logout) and five session tests.
+- 32 backend tests passed: six evidence-validator unit tests, 12 release regressions and 14 tenant-isolation tests using the disposable PostgreSQL database and fake model transport.
+- Real local `qwen2.5:3b` with two synthetic excerpts: unrelated largest-country question refused with zero citations; annual-leave question cited only source 1; invoice-total question cited only source 2. These exercise generation and verification, not full PDF ingestion or a broad quality benchmark.
+- Answer text is withheld until evidence verification succeeds. Verifier calls increase latency and usage; semantic verification is fallible. Exact evidence quotation matching is enforced. Existing stored messages are unchanged.
+- No public deployment was performed. Public HTTPS, restart/restore and representative hosted-model quality checks remain pending.
+
 ## 2026-11-11 account isolation and navigation update
 
 Frontend production build passed. Authorization unit suite: 15 passed. Tenant isolation integration suite: 14 passed against the disposable local database with fake AI. Added strict-default coverage for documents labelled public. Tab preservation compiled successfully; interactive browser verification remains pending for this update. Historical raw logs and superseded planning documents are preserved in the archives ZIP.

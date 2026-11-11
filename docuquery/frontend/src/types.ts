@@ -68,7 +68,7 @@ export type StreamEvent =
   | { type: "meta"; conversation_id: string; retrieval_ms: number; methods: string[] }
   | { type: "citations"; citations: Citation[] }
   | { type: "token"; value: string }
-  | { type: "done"; message_id: string; prompt_tokens: number; completion_tokens: number; latency_ms: number }
+  | { type: "done"; refusal_reason?: string; unverified?: boolean; message_id: string; prompt_tokens: number; completion_tokens: number; latency_ms: number }
   | { type: "error"; error: string };
 
 export interface User {

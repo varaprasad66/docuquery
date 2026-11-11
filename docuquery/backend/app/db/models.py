@@ -197,6 +197,9 @@ class QueryLog(Base):
     llm_ms: Mapped[int] = mapped_column(Integer, default=0)
     total_ms: Mapped[int] = mapped_column(Integer, default=0)
     retrieved_chunk_ids: Mapped[list | None] = mapped_column(JSON, default=None)
+    refusal_reason: Mapped[str | None] = mapped_column(String(64), default=None)
+    draft_answer: Mapped[str | None] = mapped_column(Text, default=None)
+    prompt_chars: Mapped[int | None] = mapped_column(Integer, default=None)
 
 
 class RefreshToken(Base):

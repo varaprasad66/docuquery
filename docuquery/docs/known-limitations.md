@@ -38,3 +38,7 @@ created and no repository changes were pushed.
 
 Use `upwork-portfolio.md` for a truthful description. Replace this release label only
 after the actual deployed gates in `verification-results.md` pass.
+
+## Evidence verification
+
+Answers are now buffered until a second model call checks cited claims. This introduces latency and additional inference cost. Verification uses the configured answer model, so correlated mistakes remain possible; it is not a guarantee of truth. Malformed verification results are refused, and unavailable verification prevents answer publication. Existing historical messages retain their original citations. Three synthetic real-model checks passed (unrelated geography refusal, handbook-only answer, invoice-only answer); broad real-document evaluation remains pending.

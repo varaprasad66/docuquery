@@ -34,13 +34,15 @@ from app.db.session import get_db
 from app.editions import require_professional
 from app.services import query_rewriter, semantic_cache
 from app.services.costs import calculate_cost_usd
-from app.services.llm import SYSTEM_PROMPT, llm_client
+from app.services.llm import llm_client
+from app.services.prompting import build_prompt
+from app.services.grounding import verify_answer
 from app.services.retrieval import Source, retrieve
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["chat"])
 
-HISTORY_LIMIT = 6  # previous messages sent to the model
+
 SANITIZED_STREAM_ERROR = "The assistant is temporarily unavailable. Please try again."
 
 
@@ -63,7 +65,7 @@ async def _history(db: AsyncSession, conversation_id: uuidlib.UUID) -> list[Mess
         select(Message)
         .where(Message.conversation_id == conversation_id)
         .order_by(desc(Message.created_at))
-        .limit(HISTORY_LIMIT)
+        .limit(get_settings().history_limit + 1)
     )
     return list(reversed(result.scalars().all()))
 
@@ -222,7 +224,7 @@ async def chat(
                 "cached": False,
             })
 
-            context = _build_context(sources) if sources else "NO EXCERPTS AVAILABLE."
+            sources, context, messages, prompt_chars = build_prompt(body.question, search_query, history[:-1], sources, _build_context)
             citations = [
                 Citation(
                     n=i,
@@ -234,44 +236,42 @@ async def chat(
                 ).model_dump(mode="json")
                 for i, s in enumerate(sources, start=1)
             ]
-            yield _sse({"type": "citations", "citations": citations})
-
-            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-            for msg in history[:-1]:  # exclude the just-asked question; it goes last with context
-                messages.append({"role": msg.role, "content": msg.content[:2000]})
-            messages.append(
-                {
-                    "role": "user",
-                    "content": f"CONTEXT:\n{context}\n\nQUESTION: {body.question}\n\n"
-                    "Answer using only the context. Cite excerpts as [n].",
-                }
-            )
 
             # --- LLM streaming ---
             client = llm_client()
             llm_started = time.perf_counter()
             answer_parts: list[str] = []
 
-            stream = await client.chat.completions.create(
-                model=settings.llm_model,
-                messages=messages,
-                temperature=settings.llm_temperature,
-                max_tokens=settings.llm_max_tokens,
-                stream=True,
-                stream_options={"include_usage": True},
-            )
-            async for chunk in stream:
-                if chunk.usage:
-                    prompt_tokens = chunk.usage.prompt_tokens or prompt_tokens
-                    completion_tokens = chunk.usage.completion_tokens or completion_tokens
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    answer_parts.append(delta)
-                    yield _sse({"type": "token", "value": delta})
+            if sources:
+                stream = await client.chat.completions.create(
+                    model=settings.llm_model,
+                    messages=messages,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.llm_max_tokens,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                )
+                async for chunk in stream:
+                    if chunk.usage:
+                        prompt_tokens = chunk.usage.prompt_tokens or prompt_tokens
+                        completion_tokens = chunk.usage.completion_tokens or completion_tokens
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta.content
+                    if delta:
+                        answer_parts.append(delta)
 
-            answer = "".join(answer_parts).strip()
+            draft_answer = "".join(answer_parts).strip()
+            result = await verify_answer(
+                client, body.question, draft_answer, sources, citations,
+            )
+            answer, citations, verifier_prompt, verifier_completion, refusal_reason, unverified = result
+            logger.info("reason=%s prompt_chars=%d chunks=%s", refusal_reason, prompt_chars, [str(source.chunk_id) for source in sources])
+            prompt_tokens += verifier_prompt
+            completion_tokens += verifier_completion
+            yield _sse({"type": "citations", "citations": citations})
+            for offset in range(0, len(answer), 32):
+                yield _sse({"type": "token", "value": answer[offset:offset + 32]})
             llm_ms = round((time.perf_counter() - llm_started) * 1000)
             total_ms = round((time.perf_counter() - started) * 1000)
 
@@ -304,13 +304,16 @@ async def chat(
                     llm_ms=llm_ms,
                     total_ms=total_ms,
                     retrieved_chunk_ids=[str(s.chunk_id) for s in sources],
+                    refusal_reason=refusal_reason,
+                    prompt_chars=prompt_chars,
+                    draft_answer=draft_answer[:4000] if (settings.log_draft_answers if settings.log_draft_answers is not None else not settings.is_production) else None,
                 )
             )
             await db.commit()
 
             saved_message_id = str(assistant_message.id)
             # --- Cache the fresh answer (professional) ---
-            if settings.cache_enabled and sources:
+            if settings.cache_enabled and sources and citations and refusal_reason == "ok" and not unverified:
                 try:
                     from app.services.embeddings import embed_texts
 
@@ -331,6 +334,8 @@ async def chat(
                 "completion_tokens": completion_tokens,
                 "latency_ms": total_ms,
                 "cached": False,
+                "refusal_reason": refusal_reason,
+                "unverified": unverified,
             })
         except Exception:  # noqa: BLE001 - stream errors must reach the client
             logger.exception("Chat streaming failed")

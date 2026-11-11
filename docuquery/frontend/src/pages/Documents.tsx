@@ -138,6 +138,8 @@ export default function DocumentsPage() {
   };
 
   const remove = async (id: string) => {
+    const document = docs.find((item) => item.id === id);
+    if (!window.confirm(`Delete "${document?.original_name ?? "this document"}"? It will no longer be available for questions. This cannot be undone.`)) return;
     try {
       await deleteDocument(id);
       setDocs((prev) => prev.filter((d) => d.id !== id));

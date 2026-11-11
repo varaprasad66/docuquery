@@ -79,3 +79,14 @@ Historical plans, duplicate overviews and raw logs are preserved in `archives/hi
 From frontend: `npm run build` and `npx playwright test e2e/session.spec.ts`.
 From backend: `.\.venv\Scripts\python.exe -m unittest discover -s tests -v`.
 Integration tests use the disposable local `docuquery_test` database; never point them at user data.
+
+## Answer evidence and confirmations
+
+Deleting a document and signing out require confirmation. Cancel sends no mutation request.
+
+Retrieved excerpts are candidates, not citations. The API buffers the draft, checks all claims against cited excerpts with a second model call, and requires verbatim evidence quotes before publishing. Only used sources appear in citation cards, with the checked quotation as the preview. Missing evidence produces a refusal without citations; verifier outages produce an error rather than releasing the draft. Citation numbers retain their original excerpt numbers. Existing saved conversation answers are not rewritten; start a new conversation to test the new policy.
+
+This increases response time and model usage. Model verification can still make mistakes; a matching quotation alone does not prove that an inference is correct. Evaluate representative answerable and unanswerable questions before deploying. The optional answer cache now requires the exact question and matching model/prompt/tenant/document scope; it remains disabled by default.
+
+
+For compound questions, supported parts are answered with citations and missing parts should be identified explicitly. A partial answer is not automatically refused. Extract supports invoice and contract templates, previews expected fields, labels missing values and allows CSV/JSON export. Its confidence label is the model's estimate, not a calibrated accuracy score. Review extracted values against the source before using them in business workflows. See [the timed portfolio demonstration script](docs/demo-script.md).

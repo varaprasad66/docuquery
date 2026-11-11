@@ -81,6 +81,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    if (!window.confirm("Sign out of DocuQuery? Your saved documents and conversations will remain in your account.")) return;
     try {
       await logoutUser();
       setCurrentUser(null);

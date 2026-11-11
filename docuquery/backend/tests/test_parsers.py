@@ -1,7 +1,6 @@
 """Unit tests for the multi-format parser registry, content validation,
 zip-bomb guards, and the SSRF-guarded URL fetcher. No database required."""
 
-import io
 import tempfile
 import unittest
 import zipfile
@@ -39,7 +38,7 @@ def make_pptx(path: Path) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[1])
     slide.shapes.title.text = "Quarterly Review"
     slide.placeholders[1].text = "Revenue up twenty percent"
-    slide2 = prs.slides.add_slide(prs.slide_layouts[6])  # blank slide: skipped
+    prs.slides.add_slide(prs.slide_layouts[6])  # blank slide: skipped
     prs.save(str(path))
 
 

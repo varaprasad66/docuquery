@@ -131,6 +131,11 @@ class TestReleaseRegressions(IntegrationTestCase):
             self.assertEqual(count, stored.chunk_count)
 
     async def test_public_to_private_revokes_cached_source(self):
+        from unittest.mock import patch
+        from app.config import get_settings
+        sharing = patch.object(get_settings(), "public_document_sharing_enabled", True)
+        sharing.start()
+        self.addCleanup(sharing.stop)
         doc = await self.upload_pdf(self.token, visibility="public")
         await self.process_document(doc["id"])
         bob = await self.register(f"cache-reader-{uuid.uuid4().hex}@test.io")

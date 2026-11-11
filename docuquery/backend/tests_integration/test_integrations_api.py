@@ -4,7 +4,7 @@ revocation, webhook delivery with signature verification, and SSRF rejection."""
 import json
 import uuid
 
-from tests_integration import IntegrationTestCase, make_pdf
+from tests_integration import IntegrationTestCase
 
 
 class TestApiKeys(IntegrationTestCase):
@@ -154,7 +154,7 @@ class TestWebhooks(IntegrationTestCase):
             return (200, None)
 
         with mock.patch.object(wh, "_post", side_effect=fake_post):
-            doc = await self.upload_pdf(
+            await self.upload_pdf(
                 self.token, filename="signed.pdf", text="Webhook payload marker zqwebhook."
             )
 
@@ -195,7 +195,7 @@ class TestWebhooks(IntegrationTestCase):
         ):
             # The upload dispatches processing as a background task, which
             # fails on this garbage PDF and fires document.failed exactly once.
-            doc = await self.upload_pdf(
+            await self.upload_pdf(
                 self.token, filename="doomed.pdf", content=b"%PDF-1.7 garbage"
             )
 

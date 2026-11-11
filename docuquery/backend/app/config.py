@@ -1,5 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
+from pydantic import Field
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -33,6 +35,23 @@ class Settings(BaseSettings):
     llm_model: str = "qwen2.5:3b"
     llm_temperature: float = 0.2
     llm_max_tokens: int = 1024
+
+    # Grounding and prompt controls (Phase 1)
+    grounding_mode: Literal["strict", "soft"] = "soft"
+    grounding_auto_attribution: bool = True
+    grounding_similarity_threshold: float = Field(default=0.55, ge=0, le=1)
+    grounding_fuzzy_quotes: bool = True
+    grounding_quote_threshold: float = Field(default=85, ge=0, le=100)
+    verifier_timeout_seconds: float = Field(default=30, gt=0)
+    verifier_model: str | None = None
+    rewriter_model: str | None = None
+    log_draft_answers: bool | None = None  # None: enabled locally, disabled in production
+    prompt_budget_enabled: bool = True
+    history_limit: int = Field(default=4, ge=0, le=30)
+    history_max_chars: int = Field(default=800, ge=0)
+    llm_context_budget_tokens: int = Field(default=6000, ge=256)
+    ollama_context_check: bool = True
+    answer_include_rewritten_question: bool = True
 
     # Cost analytics (USD per 1k tokens; 0 for free local models)
     llm_cost_prompt_per_1k: float = 0.0

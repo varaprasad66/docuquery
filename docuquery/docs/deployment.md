@@ -111,3 +111,13 @@ settings from a private `.env.production`, binds only the frontend to loopback, 
 expects a host HTTPS reverse proxy. Run its `migrate` release profile once before
 starting application services. Nginx permits 51 MB request bodies; production API
 limits document payloads to 10 MB, leaving multipart overhead at the proxy.
+
+## Portfolio hosting choice (reviewed 2026-11-11)
+
+Recommended full-stack target: paid Render web service plus Celery worker/scheduler and Redis-compatible queue; Supabase PostgreSQL/pgvector and private object storage; a hosted chat and embedding endpoint. The chat endpoint must support JSON-object responses for evidence verification. Keep embedding dimensions at 768 unless a schema migration and reindex are implemented. A hosted service cannot reach Ollama on your laptop through localhost.
+
+Use the repository-root `render.yaml` as the starting blueprint, supply server-side secrets described above, run migrations, create a demo account with the operator script, then verify upload, cited answers, unrelated-question refusal, separate-account privacy, logout, restart and restore over HTTPS. Attach the resulting URL and a short demo recording to the portfolio only after those checks pass.
+
+The existing blueprint is paid. Render free web services sleep after 15 minutes and cannot use persistent disks; background workers do not have free instances. Supabase Free offers 500 MB database and 1 GB storage and can pause after a week of inactivity. These tiers do not make the current complete deployment reliably free. A local recording and repository walkthrough are a zero-hosting-cost portfolio alternative.
+
+Official references: https://render.com/docs/free and https://supabase.com/pricing.

@@ -2,12 +2,11 @@
 sync run with fake LLM (valid / invalid-then-fixed / failing), async job mode
 with the status endpoint, and edition gating."""
 
-import io
 import json
 import unittest.mock as mock
 import uuid
 
-from tests_integration import IntegrationTestCase, make_pdf
+from tests_integration import IntegrationTestCase
 
 
 def _payload(data: dict, confidence: str = "high", sources: dict | None = None) -> str:

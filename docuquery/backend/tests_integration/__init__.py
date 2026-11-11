@@ -154,6 +154,14 @@ class _FakeCompletions:
     answer = "The handbook states 25 days of PTO per year [1]."
 
     async def create(self, **kwargs):
+        if kwargs.get("stream") is False:
+            # Deterministic transport fake only; semantic quality is tested with real AI separately.
+            import json
+            from types import SimpleNamespace
+            payload = json.loads(kwargs["messages"][-1]["content"])
+            evidence = [{"n": source["n"], "quote": source["text"]} for source in payload["sources"]]
+            return SimpleNamespace(usage=None, choices=[SimpleNamespace(message=SimpleNamespace(
+                content=json.dumps({"supported": True, "evidence": evidence})))])
         class _Completion:
             def __init__(self, outer):
                 self.outer = outer
@@ -161,10 +169,9 @@ class _FakeCompletions:
                 self.choices = []
                 self._sent = 0
 
-        obj = _Completion(self)
+        _Completion(self)
 
         async def _gen():
-            usage_sent = False
             for word in _FakeCompletions.answer.split(" "):
                 chunk = type("C", (), {})()
                 chunk.usage = None

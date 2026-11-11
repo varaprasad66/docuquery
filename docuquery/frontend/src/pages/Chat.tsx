@@ -9,6 +9,7 @@ import type { ChatMessage, Citation, ConversationSummary } from "../types";
 
 interface LocalMessage extends ChatMessage {
   streaming?: boolean;
+  unverified?: boolean;
   retrieval_ms?: number;
   prompt_tokens?: number;
   completion_tokens?: number;
@@ -173,6 +174,7 @@ export default function ChatPage() {
                     ...m,
                     id: ev.message_id ?? m.id,
                     streaming: false,
+                    unverified: ev.unverified,
                     latency_ms: ev.latency_ms,
                     prompt_tokens: ev.prompt_tokens,
                     completion_tokens: ev.completion_tokens,
@@ -316,8 +318,9 @@ export default function ChatPage() {
             ) : (
               <div key={m.id} className="flex flex-col gap-2.5 max-w-[85%]">
                 <div className="bg-slate-50 border border-slate-200/80 px-4 py-3.5 rounded-2xl rounded-tl-xs shadow-xs relative group">
+                  {m.unverified && <span className="text-xs text-amber-700">Unverified — review the sources</span>}
                   <AnswerBody
-                    content={m.content || "Generating answer..."}
+                    content={m.content || "Preparing answer and checking sources..."}
                     onCitationClick={(n) => handleCitationClick(n, m.citations)}
                   />
 

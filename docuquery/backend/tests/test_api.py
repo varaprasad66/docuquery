@@ -2,8 +2,6 @@
 
 import io
 import unittest
-from unittest.mock import AsyncMock, MagicMock
-import uuid
 
 from fastapi import HTTPException, UploadFile
 from pydantic import ValidationError
@@ -12,10 +10,6 @@ from app.api.dependencies import get_current_user
 from app.api.documents import _pdf_magic
 from app.api.schemas import (
     ChatRequest,
-    DocumentOut,
-    SearchRequest,
-    StatsOverview,
-    UserLogin,
     UserRegister,
 )
 

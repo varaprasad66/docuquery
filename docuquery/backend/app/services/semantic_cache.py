@@ -34,7 +34,8 @@ def scope_hash(owner_id: UUID | None, document_ids: list[str] | None = None) -> 
     """Tenant scope fingerprint. Guest scope is distinct from any user scope."""
     s = get_settings()
     from app.services.llm import SYSTEM_PROMPT
-    prompt_version = hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest()
+    from app.services.grounding import VERIFIER_PROMPT
+    prompt_version = hashlib.sha256((SYSTEM_PROMPT + VERIFIER_PROMPT).encode()).hexdigest()
     raw = f"prompt:{prompt_version}|model:{s.llm_base_url}:{s.llm_model}|embedding:{s.embeddings_model}:{s.embed_dim}|owner:{owner_id or 'guest'}|docs:{sorted(document_ids or [])}"
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
@@ -58,6 +59,7 @@ async def lookup(
                        completion_tokens, (question_embedding <=> CAST(:qvec AS vector)) AS dist
                 FROM semantic_cache
                 WHERE scope_hash = :scope AND expires_at > now()
+                  AND question = :question
                   AND question_embedding IS NOT NULL
                 ORDER BY question_embedding <=> CAST(:qvec AS vector)
                 LIMIT 1
@@ -66,6 +68,7 @@ async def lookup(
             {
                 "qvec": query_vector_literal,
                 "scope": scope_hash(owner_id, document_ids),
+                "question": question,
             },
         )
         row = rows.first()

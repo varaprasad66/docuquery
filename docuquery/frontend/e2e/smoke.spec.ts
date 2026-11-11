@@ -59,6 +59,7 @@ test("login, upload, and chat with a citation", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: "test-results/chat-mobile.png", fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  page.once("dialog", dialog => dialog.accept());
   await page.getByRole("button", { name: "Sign Out" }).click();
   await expect(page.getByRole("button", { name: "Sign In", exact: true })).toBeVisible();
   await page.reload();

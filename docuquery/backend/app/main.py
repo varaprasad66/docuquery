@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 import logging
 import uuid as uuidlib
 
@@ -51,9 +52,17 @@ class ErrorSanitizingMiddleware(BaseHTTPMiddleware):
             )
 
 
+@asynccontextmanager
+async def lifespan(app):
+    from app.services.ollama_health import check_ollama_context
+    await check_ollama_context()
+    yield
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
+        lifespan=lifespan,
         title=settings.app_name,
         description="Local-first document intelligence: RAG + OCR over your PDFs.",
         version="0.3.0",
