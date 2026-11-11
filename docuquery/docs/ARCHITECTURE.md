@@ -164,6 +164,54 @@ generation, a validation pass strips any citation marker that doesn't map to a r
 source. Every answer is logged with its retrieval and generation timings and token
 usage, powering the analytics dashboard.
 
+### 3.3 Grounding pipeline upgrade (phases 1–3)
+
+The answer path above was hardened against **false refusals** and for **citation
+quality** (every switch has a safe default and lives in `.env.example`):
+
+1. **Soft verification** (`GROUNDING_MODE=soft`, default): a draft that cites one good
+   source and one unverifiable claim keeps the supported sentence and drops the rest —
+   the whole answer is no longer refused because one citation failed. Quote checking
+   is whitespace/unicode/hyphenation tolerant (`rapidfuzz`, `GROUNDING_FUZZY_QUOTES`).
+   A draft without `[n]` markers gets **automatic per-sentence attribution**
+   (`GROUNDING_AUTO_ATTRIBUTION`): sentences are embedded and matched to retrieved
+   chunks above `GROUNDING_SIMILARITY_THRESHOLD`; such answers surface an
+   "Unverified" badge instead of a refusal.
+2. **Diagnosed refusals**: every refusal carries a machine-readable reason code —
+   `no_sources`, `empty_draft`, `model_refused`, `no_citation_markers`,
+   `invalid_marker`, `verifier_bad_json`, `verifier_rejected`, `quote_mismatch`,
+   `verifier_error`, `low_relevance` — streamed in the SSE `done` event and stored in
+   `query_logs.refusal_reason` (with `draft_answer`/`prompt_chars` when
+   `LOG_DRAFT_ANSWERS` is on). Real "not in the documents" is now distinguishable
+   from pipeline failure.
+3. **Prompt budget**: history is capped (`HISTORY_LIMIT`, `HISTORY_MAX_CHARS`) and the
+   lowest-ranked excerpts are dropped first when the prompt exceeds
+   `LLM_CONTEXT_BUDGET_TOKENS` (`PROMPT_BUDGET_ENABLED`); a startup check warns when
+   the local model's `num_ctx` is below the budget (see docs/OLLAMA_SETUP.md).
+4. **Retrieval quality**: embedding task prefixes for nomic-embed-text
+   (`EMBED_DOC_PREFIX`/`EMBED_QUERY_PREFIX`) with a version tag on every chunk
+   (`chunks.embedding_model`) and a resumable reindex script
+   (`scripts/reindex_embeddings.py`); contextual headers
+   ("Document: name | location") on embedder input only; **neighbor expansion**
+   (`NEIGHBOR_EXPANSION`) attaches the previous/next chunk of each hit as uncited
+   context; the optional cross-encoder reranks a 20-candidate pool
+   (`RERANKER_CANDIDATES`) with a guaranteed keyword-only slot; a configurable
+   **relevance floor** (`MIN_RELEVANCE`) refuses with `low_relevance` instead of
+   guessing.
+5. **Citations**: each citation carries `chunk_id`, the full chunk text and the
+   supporting quote's character offsets; the final answer renumbers `[n]` in order of
+   first appearance; the inspector highlights the quote inside the chunk and can open
+   the source PDF at the cited page. Refusals and unverified answers are never written
+   to the semantic cache.
+6. **Degraded ingestion**: if embedding fails mid-ingestion the document is still
+   searchable by keyword and marked `documents.degraded` (keyword-only badge +
+   Re-embed action in the UI; `POST /api/documents/{id}/reembed` heals it).
+   `PDF_EXTRACTOR=markdown` optionally uses pymupdf4llm for layout-aware extraction.
+
+Measuring all of the above: `scripts/eval_e2e.py` runs the real pipeline over a JSON
+dataset and reports false/correct refusal rates, keyword recall, citation page hits,
+the refusal-reason histogram and p50/p95 latency (see `scripts/evals/` for a template).
+
 ---
 
 ## 4. Component responsibilities

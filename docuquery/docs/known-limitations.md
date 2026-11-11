@@ -42,3 +42,35 @@ after the actual deployed gates in `verification-results.md` pass.
 ## Evidence verification
 
 Answers are now buffered until a second model call checks cited claims. This introduces latency and additional inference cost. Verification uses the configured answer model, so correlated mistakes remain possible; it is not a guarantee of truth. Malformed verification results are refused, and unavailable verification prevents answer publication. Existing historical messages retain their original citations. Three synthetic real-model checks passed (unrelated geography refusal, handbook-only answer, invoice-only answer); broad real-document evaluation remains pending.
+
+## Grounding / retrieval upgrade boundary (11 November 2026)
+
+The phases 1–3 upgrade (soft verification, diagnosed refusals, prompt budget,
+embedding prefixes + reindex, neighbor expansion, optional reranker, relevance
+floor, degraded ingestion, rich citations) is covered by 295 automated tests,
+a mocked-SSE Playwright pass and a live smoke eval against a real 2-page PDF
+with qwen2.5:3b. The following remain true and should be re-checked against a
+real corpus:
+
+- Soft verification reduces false refusals but does not make the verifier an
+  oracle: paraphrases can still be rejected (`verifier_rejected`) and a weak
+  model can bless a wrong sentence. `unverified` auto-attributed answers are
+  similarity-based, never entailment.
+- Changing embed prefixes/contextual settings re-styles every embedder input;
+  until `scripts/reindex_embeddings.py` runs, vector recall is depressed (the
+  script is resumable and invalidates the answer cache).
+- `MIN_RELEVANCE` semantics depend on the ranking source (reranker sigmoid vs
+  raw cosine vs ts_rank_cd). The default (0) never refuses previously
+  answerable cases; a floor set blindly high can reintroduce refusals.
+- `PDF_EXTRACTOR=markdown` has no OCR fallback: scanned pages yield little or
+  no text in that mode. Use `plain` for scanned documents.
+- The neighbor-expansion context is uncited; quotes verified by the verifier
+  may come from either the hit chunk or its attached neighbors — offsets are
+  best-effort and fuzzy, so highlights can be a few characters off for
+  exotic Unicode.
+- The citation "Open page N" action relies on the browser's built-in PDF
+  viewer honoring `#page=N` on blob URLs (Chromium/Firefox); other viewers may
+  open at page 1.
+- The e2e eval measures the configured pipeline only. Small datasets (the
+  template's 8 questions) produce noisy rates; fill in 20+ cases from a real
+  PDF before comparing profiles.
