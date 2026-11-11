@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import client_identity, get_current_user_optional_dep
+from app.api.dependencies import client_identity, get_current_user, require_jwt_session
 from app.config import get_settings
 from app.db.models import Chunk, Document, DocumentStatus, ExtractionJob, ExtractionJobStatus, User
 from app.db.session import get_db
@@ -33,7 +33,7 @@ from app.services.security import ensure_document_read
 from app.workers.tasks import process_extraction_job, process_extraction_job_core
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/extract", tags=["extract"], dependencies=[Depends(require_professional)])
+router = APIRouter(prefix="/api/extract", tags=["extract"], dependencies=[Depends(require_professional), Depends(require_jwt_session)])
 
 
 class ExtractRequest(BaseModel):
@@ -135,7 +135,7 @@ async def extract_sync(
     body: ExtractRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     try:
         template, schema = resolve_schema(body.template, body.json_schema)
@@ -168,7 +168,7 @@ async def create_extraction_job(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     # Validate the request fully before accepting the job (fail fast, 4xx).
     try:
@@ -201,7 +201,7 @@ async def create_extraction_job(
 async def get_extraction_job(
     job_id: uuidlib.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     job = await db.get(ExtractionJob, job_id)
     if job is None:

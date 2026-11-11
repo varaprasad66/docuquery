@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import uuid as uuidlib
 from datetime import datetime, timezone
 from pathlib import Path
@@ -6,20 +7,22 @@ from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
     client_identity,
     get_current_user_optional_dep,
+    get_current_user,
     rate_limit_upload,
     require_api_key_scope,
 )
 from app.api.schemas import DocumentDetail, DocumentOut, UrlImportRequest, VisibilityUpdate
 from app.config import get_settings
-from app.db.models import Document, DocumentStatus, DocumentVisibility, User
+from app.db.models import Document, DocumentStatus, DocumentVisibility, User, SemanticCacheEntry, StorageCleanup
 from app.db.session import get_db
 from app.services.audit import record_audit
+from app.services import storage
 from app.services.parsers import (
     SUPPORTED_EXTENSIONS,
     check_zip_safety,
@@ -74,13 +77,43 @@ def _dispatch_processing(document_id: str, background_tasks: BackgroundTasks) ->
             process_document.delay(document_id)
             logger.info("Queued document %s via Celery", document_id)
             return
-        except Exception as exc:
-            logger.warning(
-                "Celery broker unavailable (%s); falling back to FastAPI BackgroundTasks", exc
-            )
+        except Exception:
+            logger.warning("Broker unavailable; document remains queued for recovery", exc_info=True)
+            if settings.is_production:
+                return  # durable processing row is redispatched by maintenance
+
 
     background_tasks.add_task(process_document_core, document_id)
     logger.info("Dispatched document %s to FastAPI BackgroundTasks", document_id)
+
+
+async def _store_upload(db, user, doc_id, name, contents, mime_type, visibility, source_url=None):
+    """Reserve quota and an object compensation record before uploading bytes."""
+    settings = get_settings()
+    await db.execute(select(User.id).where(User.id == user.id).with_for_update())
+    if settings.max_uploads_per_day > 0:
+        midnight = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        count = await db.scalar(select(func.count(Document.id)).where(Document.owner_id == user.id, Document.created_at >= midnight))
+        if count >= settings.max_uploads_per_day:
+            raise HTTPException(429, "Daily upload quota reached.")
+    location = storage.locator(user.id, doc_id, Path(name).suffix.lower())
+    doc = Document(id=doc_id, original_name=name, stored_path=location, mime_type=mime_type,
+                   source_url=source_url, size_bytes=len(contents), owner_id=user.id,
+                   visibility=visibility, status=DocumentStatus.processing, progress=0.01)
+    cleanup = StorageCleanup(locator=location)
+    db.add_all([doc, cleanup])
+    await db.commit()  # Atomic quota reservation before the object write.
+    try:
+        await asyncio.to_thread(storage.put, location, contents)
+    except Exception:
+        logger.exception("Source upload failed for document %s", doc_id)
+        # No referenced source remains; the durable compensation record can be retried.
+        await db.delete(doc)
+        await db.commit()
+        raise HTTPException(503, "Document storage is temporarily unavailable. Please retry.") from None
+    await db.delete(cleanup)
+    await db.commit()
+    return doc
 
 
 @router.post("", response_model=DocumentOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit_upload), Depends(require_api_key_scope("upload"))])
@@ -89,7 +122,7 @@ async def upload_document(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
     visibility: str = "private",
 ) -> Document:
     settings = get_settings()
@@ -166,21 +199,8 @@ async def upload_document(
         requested_visibility = DocumentVisibility.private.value
 
     doc_id = uuidlib.uuid4()
-    stored_path = settings.upload_dir / f"{doc_id}{ext}"
-    stored_path.write_bytes(contents)
-
-    doc = Document(
-        id=doc_id,
-        original_name=file.filename,
-        stored_path=str(stored_path),
-        mime_type=file.content_type or "application/octet-stream",
-        size_bytes=len(contents),
-        owner_id=user.id if user else None,
-        visibility=requested_visibility,
-        status=DocumentStatus.processing,
-        progress=0.01,
-    )
-    db.add(doc)
+    doc = await _store_upload(db, user, doc_id, file.filename, contents,
+                              file.content_type or "application/octet-stream", requested_visibility)
     ip, ua = await client_identity(request)
     await record_audit(
         db, "doc.upload", actor_id=user.id if user else None, resource_type="document",
@@ -199,7 +219,7 @@ async def import_document_from_url(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ) -> Document:
     """Import a document by URL: SSRF-guarded fetch, size cap, content-type check."""
     settings = get_settings()
@@ -249,22 +269,8 @@ async def import_document_from_url(
         requested_visibility = DocumentVisibility.private.value
 
     doc_id = uuidlib.uuid4()
-    stored_path = settings.upload_dir / f"{doc_id}{ext}"
-    stored_path.write_bytes(contents)
-
-    doc = Document(
-        id=doc_id,
-        original_name=suggest_name(body.url, ext),
-        stored_path=str(stored_path),
-        mime_type=content_type,
-        source_url=body.url,
-        size_bytes=len(contents),
-        owner_id=user.id if user else None,
-        visibility=requested_visibility,
-        status=DocumentStatus.processing,
-        progress=0.01,
-    )
-    db.add(doc)
+    doc = await _store_upload(db, user, doc_id, suggest_name(body.url, ext), contents,
+                              content_type, requested_visibility, body.url)
     ip, ua = await client_identity(request)
     await record_audit(
         db, "doc.url_import", actor_id=user.id if user else None, resource_type="document",
@@ -282,15 +288,19 @@ async def list_documents(
     db: AsyncSession = Depends(get_db),
     user: User | None = Depends(get_current_user_optional_dep),
 ) -> list[Document]:
-    if user is not None:
+    if not get_settings().public_document_sharing_enabled:
+        if user is None:
+            return []
+        query = select(Document).where(Document.owner_id == user.id)
+    elif user is not None:
         # Own documents (any visibility) + everything public.
         query = select(Document).where(
             (Document.owner_id == user.id) | (Document.visibility == DocumentVisibility.public.value)
         )
     else:
-        # Guests see public documents + the guest space (their own unowned uploads).
+        # Anonymous visitors see only explicitly public sample documents.
         query = select(Document).where(
-            (Document.visibility == DocumentVisibility.public.value) | (Document.owner_id.is_(None))
+            Document.visibility == DocumentVisibility.public.value
         )
     query = query.order_by(Document.created_at.desc())
     result = await db.execute(query)
@@ -310,18 +320,19 @@ async def get_document(
     return doc
 
 
-@router.patch("/{document_id}/visibility", response_model=DocumentOut)
+@router.patch("/{document_id}/visibility", response_model=DocumentOut, dependencies=[Depends(require_api_key_scope("upload"))])
 async def update_visibility(
     document_id: uuidlib.UUID,
     body: VisibilityUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     doc = await db.get(Document, document_id)
     if doc is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found.")
     ensure_document_mutate(user, doc)
+    await db.execute(delete(SemanticCacheEntry))
     doc.visibility = body.visibility
     ip, ua = await client_identity(request)
     await record_audit(
@@ -333,13 +344,13 @@ async def update_visibility(
     return doc
 
 
-@router.post("/{document_id}/retry", response_model=DocumentOut)
+@router.post("/{document_id}/retry", response_model=DocumentOut, dependencies=[Depends(require_api_key_scope("upload"))])
 async def retry_document(
     document_id: uuidlib.UUID,
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     """Re-trigger extraction and indexing for a failed or stuck document."""
     doc = await db.get(Document, document_id)
@@ -362,24 +373,88 @@ async def retry_document(
     return doc
 
 
-@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/{document_id}/reembed", response_model=DocumentOut, dependencies=[Depends(require_api_key_scope("upload"))])
+async def reembed_document(
+    document_id: uuidlib.UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    """Re-embed a degraded (keyword-only) document, or one indexed with an old
+    embedding configuration. Chunks are re-embedded in place — no re-parsing."""
+    doc = await db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found.")
+    ensure_document_mutate(user, doc)
+    if doc.status != DocumentStatus.ready:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Only processed documents can be re-embedded. Retry processing first.",
+        )
+    if doc.chunk_count == 0:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Document has no indexed chunks.")
+
+    doc.status = DocumentStatus.processing
+    doc.progress = 0.05
+    ip, ua = await client_identity(request)
+    await record_audit(
+        db, "doc.reembed", actor_id=user.id if user else None, resource_type="document",
+        resource_id=str(doc.id), ip=ip, user_agent=ua,
+    )
+    await db.commit()
+    await db.refresh(doc)
+
+    from app.workers.tasks import reembed_document as reembed_task, reembed_document_core
+
+    if get_settings().use_celery:
+        try:
+            reembed_task.delay(str(doc.id))
+        except Exception:
+            logger.warning("Broker unavailable; re-embedding inline", exc_info=True)
+            await asyncio.to_thread(reembed_document_core, str(doc.id))
+    else:
+        background_tasks.add_task(reembed_document_core, str(doc.id))
+    return doc
+
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_api_key_scope("upload"))])
 async def delete_document(
     document_id: uuidlib.UUID,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     doc = await db.get(Document, document_id)
     if doc is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found.")
     ensure_document_mutate(user, doc)
 
-    stored = Path(doc.stored_path)
+    db.add(StorageCleanup(locator=doc.stored_path))
     ip, ua = await client_identity(request)
     await record_audit(
         db, "doc.delete", actor_id=user.id if user else None, resource_type="document",
         resource_id=str(doc.id), ip=ip, user_agent=ua, detail={"name": doc.original_name[:256]},
     )
+    await db.execute(delete(SemanticCacheEntry))
     await db.delete(doc)  # chunks cascade in Postgres
     await db.commit()
-    stored.unlink(missing_ok=True)  # best-effort file cleanup
+    # A durable cleanup row is consumed by the maintenance worker.
+
+
+@router.get("/{document_id}/download", dependencies=[Depends(require_api_key_scope("read"))])
+async def download_document(document_id: uuidlib.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    from fastapi.responses import Response
+    from urllib.parse import quote
+    doc = await db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(404, "Document not found.")
+    ensure_document_read(user, doc)
+    def read_source():
+        with storage.materialize(doc.stored_path) as source:
+            return source.read_bytes()
+    content = await asyncio.to_thread(read_source)
+    return Response(content, media_type="application/octet-stream", headers={
+        "Content-Disposition": "attachment; filename*=UTF-8''" + quote(doc.original_name, safe=""),
+        "Cache-Control": "private, no-store",
+    })

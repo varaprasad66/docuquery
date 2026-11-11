@@ -40,11 +40,22 @@ function authHeaders(): Record<string, string> {
 
 async function safeFetch(url: string, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(url, init);
+    const response = await fetch(url, init);
+    const sentToken = new Headers(init?.headers).get("Authorization");
+    if (response.status === 401 && sentToken && !url.startsWith(`${BASE}/auth/`)) {
+      const current = getStoredToken();
+      const renewed = current && sentToken !== `Bearer ${current}` ? current : (await refreshSession())?.access_token;
+      if (renewed) {
+        const headers = new Headers(init?.headers);
+        headers.set("Authorization", `Bearer ${renewed}`);
+        return await fetch(url, { ...init, headers });
+      }
+    }
+    return response;
   } catch (err: unknown) {
     if (err instanceof Error && (err.name === "TypeError" || err.message === "Failed to fetch")) {
       throw new Error(
-        "Could not connect to backend server at http://127.0.0.1:8100. Please ensure the backend is running (python run.py).",
+        "Could not connect to DocuQuery. Check your connection and try again.",
       );
     }
     throw err;
@@ -53,10 +64,18 @@ async function safeFetch(url: string, init?: RequestInit): Promise<Response> {
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    let detail = res.statusText;
+    let detail = res.statusText || `Request failed (${res.status})`;
     try {
       const body = await res.json();
-      detail = body.detail ?? detail;
+      if (typeof body.detail === "string") detail = body.detail;
+      else if (Array.isArray(body.detail)) {
+        detail = body.detail.map((issue: unknown) => {
+          if (!issue || typeof issue !== "object") return "Invalid input";
+          const error = issue as { loc?: unknown; msg?: unknown };
+          const field = Array.isArray(error.loc) ? error.loc.filter((part) => part !== "body").join(".") : "";
+          return `${field ? `${field}: ` : ""}${typeof error.msg === "string" ? error.msg.replace(/^Value error, /, "") : "Invalid input"}`;
+        }).join("; ");
+      }
     } catch {
       /* keep statusText */
     }
@@ -89,6 +108,28 @@ export async function retryDocument(id: string): Promise<DocRecord> {
       headers: authHeaders(),
     }),
   );
+}
+
+export async function reembedDocument(id: string): Promise<DocRecord> {
+  return json(
+    await safeFetch(`${BASE}/documents/${id}/reembed`, {
+      method: "POST",
+      headers: authHeaders(),
+    }),
+  );
+}
+
+export async function openDocumentAtPage(documentId: string, page: number): Promise<void> {
+  /** Fetch the source PDF with auth headers and open the browser PDF viewer at
+   * the cited page (#page=N works on blob: URLs in Chromium and Firefox). */
+  const res = await safeFetch(`${BASE}/documents/${documentId}/download`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Could not fetch the source document.");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  window.open(`${url}#page=${page}`, "_blank", "noopener");
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 export async function importDocumentFromUrl(url: string): Promise<DocRecord> {
@@ -188,11 +229,14 @@ export async function loginUser(email: string, password: string): Promise<TokenR
 
 export async function fetchMe(): Promise<User | null> {
   const token = getStoredToken();
-  if (!token) return null;
+  if (!token) return (await refreshSession())?.user ?? null;
   try {
-    return await json<User>(
-      await safeFetch(`${BASE}/auth/me`, { headers: authHeaders() }),
-    );
+    let response = await safeFetch(`${BASE}/auth/me`, { headers: authHeaders() });
+    if (response.status === 401) {
+      const session = await refreshSession();
+      return session?.user ?? null;
+    }
+    return await json<User>(response);
   } catch {
     clearStoredToken();
     return null;
@@ -202,7 +246,24 @@ export async function fetchMe(): Promise<User | null> {
 // Session refresh: the refresh token lives in an HttpOnly cookie, so this call
 // carries credentials and the CSRF-guard header. Returns null when the session
 // cannot be extended (user must sign in again).
-export async function refreshSession(): Promise<TokenResponse | null> {
+let refreshInFlight: Promise<TokenResponse | null> | null = null;
+export function refreshSession(): Promise<TokenResponse | null> {
+  if (!refreshInFlight) {
+    const previous = getStoredToken();
+    const renew = async () => {
+      const current = getStoredToken();
+      if (current && current !== previous) {
+        const response = await fetch(`${BASE}/auth/me`, { headers: authHeaders() });
+        if (response.ok) return { access_token: current, user: await response.json(), token_type: "bearer" } as TokenResponse;
+      }
+      return renewSession();
+    };
+    refreshInFlight = (typeof navigator !== "undefined" && navigator.locks
+      ? navigator.locks.request("docuquery-session", renew) : renew()).finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
+async function renewSession(): Promise<TokenResponse | null> {
   try {
     const res = await safeFetch(`${BASE}/auth/refresh`, {
       method: "POST",
@@ -216,6 +277,17 @@ export async function refreshSession(): Promise<TokenResponse | null> {
   } catch {
     return null;
   }
+}
+
+export async function logoutUser(): Promise<void> {
+  // Finish rotation before revoking its replacement cookie.
+  if (refreshInFlight) await refreshInFlight;
+  const response = await safeFetch(`${BASE}/auth/logout`, {
+    method: "POST", credentials: "include",
+    headers: { ...authHeaders(), "X-Requested-With": "XMLHttpRequest" },
+  });
+  if (!response.ok) throw new Error("Sign-out could not be completed. Please try again.");
+  clearStoredToken();
 }
 
 // --- Conversations & Chat ---
@@ -261,7 +333,8 @@ export async function streamChat(
   if (!res.ok || !res.body) {
     let detail = `Chat failed (${res.status})`;
     try {
-      detail = (await res.json()).detail ?? detail;
+      const body = await res.json();
+      detail = typeof body.detail === "string" ? body.detail : detail;
     } catch {
       /* ignore */
     }
@@ -273,6 +346,8 @@ export async function streamChat(
   const decoder = new TextDecoder();
   let buffer = "";
 
+  let completed = false;
+  try {
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -284,10 +359,22 @@ export async function streamChat(
       const line = block.trim();
       if (!line.startsWith("data: ")) continue;
       try {
-        onEvent(JSON.parse(line.slice(6)) as StreamEvent);
+        const event = JSON.parse(line.slice(6)) as StreamEvent;
+        if (event.type === "done" || event.type === "error") completed = true;
+        onEvent(event);
       } catch {
         /* ignore partial frame */
       }
     }
   }
+  if (!completed) onEvent({ type: "error", error: "The response was interrupted. Please try again." });
+  } catch {
+    onEvent({ type: "error", error: "The connection was interrupted. Please try again." });
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+export async function fetchConfig(): Promise<{ max_upload_mb: number; url_import_enabled: boolean; registration_enabled: boolean; integrations_enabled: boolean }> {
+  return json(await safeFetch(`${BASE}/health/config`));
 }

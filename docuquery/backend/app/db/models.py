@@ -102,6 +102,10 @@ class Document(TimestampMixin, Base):
         server_default="public",
         index=True,
     )
+    # True when ingestion finished but embedding failed: the document is
+    # searchable by keyword (BM25) only. Cleared by a successful re-embed
+    # (POST /api/documents/{id}/reembed). Migration 0008.
+    degraded: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
 
     owner: Mapped[User | None] = relationship(back_populates="documents")
     chunks: Mapped[list["Chunk"]] = relationship(
@@ -197,6 +201,9 @@ class QueryLog(Base):
     llm_ms: Mapped[int] = mapped_column(Integer, default=0)
     total_ms: Mapped[int] = mapped_column(Integer, default=0)
     retrieved_chunk_ids: Mapped[list | None] = mapped_column(JSON, default=None)
+    refusal_reason: Mapped[str | None] = mapped_column(String(64), default=None)
+    draft_answer: Mapped[str | None] = mapped_column(Text, default=None)
+    prompt_chars: Mapped[int | None] = mapped_column(Integer, default=None)
 
 
 class RefreshToken(Base):
@@ -340,3 +347,9 @@ class SemanticCacheEntry(Base):
         DateTime(timezone=True), server_default=text("now()")
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class StorageCleanup(TimestampMixin, Base):
+    __tablename__ = "storage_cleanup"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    locator: Mapped[str] = mapped_column(String(1024))

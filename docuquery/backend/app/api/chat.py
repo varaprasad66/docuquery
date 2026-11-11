@@ -10,16 +10,16 @@ import time
 import uuid as uuidlib
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
-    client_identity,
-    get_current_user_optional_dep,
+    get_current_user,
     rate_limit_chat,
     require_api_key_scope,
+    require_jwt_session,
 )
 from app.api.schemas import (
     ChatRequest,
@@ -34,22 +34,25 @@ from app.db.session import get_db
 from app.editions import require_professional
 from app.services import query_rewriter, semantic_cache
 from app.services.costs import calculate_cost_usd
-from app.services.llm import SYSTEM_PROMPT, llm_client
+from app.services.llm import llm_client
+from app.services.prompting import build_prompt
+from app.services.grounding import REFUSAL, GroundingResult, locate_quote, renumber_citations, verify_answer
 from app.services.retrieval import Source, retrieve
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["chat"])
 
-HISTORY_LIMIT = 6  # previous messages sent to the model
+
 SANITIZED_STREAM_ERROR = "The assistant is temporarily unavailable. Please try again."
 
 
 def _build_context(sources: list[Source]) -> str:
     """Excerpts are untrusted document data: they are wrapped in explicit
-    delimiters so prompt-injection text inside documents stays data."""
+    delimiters so prompt-injection text inside documents stays data. Each
+    excerpt carries its neighbor-expanded context (if any)."""
     parts = []
     for i, s in enumerate(sources, start=1):
-        parts.append(f"[{i}] ({s.document_name}, {s.source_label})\n{s.content}")
+        parts.append(f"[{i}] ({s.document_name}, {s.source_label})\n{s.context_text}")
     body = "\n\n".join(parts)
     return (
         "<untrusted_document_context>\n"
@@ -63,7 +66,7 @@ async def _history(db: AsyncSession, conversation_id: uuidlib.UUID) -> list[Mess
         select(Message)
         .where(Message.conversation_id == conversation_id)
         .order_by(desc(Message.created_at))
-        .limit(HISTORY_LIMIT)
+        .limit(get_settings().history_limit + 1)
     )
     return list(reversed(result.scalars().all()))
 
@@ -87,6 +90,29 @@ async def _get_owned_conversation(
     return conversation
 
 
+def _enrich_citations(citations: list[dict], sources: list[Source]) -> list[dict]:
+    """Attach chunk identity, full chunk text and the supporting quote's char
+    offsets so the UI can highlight the evidence inside the chunk. Offsets are
+    best-effort: auto-attributed citations carry no verifier quote."""
+    enriched = []
+    for citation in citations:
+        index = citation.get("n", 0) - 1
+        if 0 <= index < len(sources):
+            source = sources[index]
+            citation = {
+                **citation,
+                "chunk_id": str(source.chunk_id),
+                "chunk_text": source.content[:4000],
+            }
+            snippet = citation.get("snippet")
+            if snippet:
+                offsets = locate_quote(source.content, snippet)
+                if offsets:
+                    citation["quote_start"], citation["quote_end"] = offsets
+        enriched.append(citation)
+    return enriched
+
+
 def _sse(event: dict) -> str:
     return f"data: {json.dumps(event, default=str)}\n\n"
 
@@ -96,7 +122,7 @@ async def chat(
     body: ChatRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     settings = get_settings()
     started = time.perf_counter()
@@ -105,9 +131,10 @@ async def chat(
     # Daily question quota (professional edition; 0 = unlimited).
     if user and settings.max_daily_questions > 0:
         midnight = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        await db.execute(select(User.id).where(User.id == user.id).with_for_update())
         count_res = await db.execute(
-            select(func.count(QueryLog.id)).where(
-                QueryLog.owner_id == user.id, QueryLog.created_at >= midnight
+            select(func.count(Message.id)).join(Conversation).where(
+                Conversation.owner_id == user.id, Message.created_at >= midnight, Message.role == "user"
             )
         )
         if int(count_res.scalar_one() or 0) >= settings.max_daily_questions:
@@ -149,25 +176,19 @@ async def chat(
                 try:
                     from app.services.embeddings import embed_texts
 
-                    qvec = (await embed_texts([search_query]))[0]
+                    qvec = (await embed_texts([search_query], task="query"))[0]
                     qvec_literal = "[" + ",".join(f"{x:.7g}" for x in qvec) + "]"
                     hit = await semantic_cache.lookup(
                         db, owner_id, qvec_literal, search_query,
                         document_ids=[str(d) for d in body.document_ids] if body.document_ids else None,
                     )
                     if hit:
+                        assistant = Message(conversation_id=conversation_id, role="assistant", content=hit.answer, citations=hit.citations)
+                        db.add(assistant)
+                        await db.flush()
+                        cached_message_id = str(assistant.id)
                         retrieval_ms = round((time.perf_counter() - started) * 1000)
                         total_ms = retrieval_ms
-                        yield _sse({
-                            "type": "meta",
-                            "conversation_id": str(conversation_id),
-                            "retrieval_ms": retrieval_ms,
-                            "methods": hit.methods or ["cache"],
-                            "cached": True,
-                        })
-                        yield _sse({"type": "citations", "citations": hit.citations})
-                        for piece in [hit.answer[i:i + 24] for i in range(0, len(hit.answer), 24)]:
-                            yield _sse({"type": "token", "value": piece})
                         db.add(
                             QueryLog(
                                 owner_id=owner_id,
@@ -182,17 +203,32 @@ async def chat(
                                 total_ms=total_ms,
                             )
                         )
+                        assistant.prompt_tokens = 0
+                        assistant.completion_tokens = hit.completion_tokens
+                        assistant.latency_ms = total_ms
                         await db.commit()
+                        yield _sse({
+                            "type": "meta",
+                            "conversation_id": str(conversation_id),
+                            "retrieval_ms": retrieval_ms,
+                            "methods": hit.methods or ["cache"],
+                            "cached": True,
+                        })
+                        yield _sse({"type": "citations", "citations": hit.citations})
+                        for piece in [hit.answer[i:i + 24] for i in range(0, len(hit.answer), 24)]:
+                            yield _sse({"type": "token", "value": piece})
                         yield _sse({
                             "type": "done",
                             "prompt_tokens": 0,
                             "completion_tokens": hit.completion_tokens,
                             "latency_ms": total_ms,
+                            "message_id": cached_message_id,
                             "cached": True,
                         })
                         return
                 except Exception:
                     logger.warning("Cache path failed; answering normally", exc_info=True)
+                    await db.rollback()
 
             # --- Retrieval (tenant-scoped, uses the standalone query) ---
             sources, methods = await retrieve(
@@ -212,7 +248,26 @@ async def chat(
                 "cached": False,
             })
 
-            context = _build_context(sources) if sources else "NO EXCERPTS AVAILABLE."
+            # --- Relevance floor: below it, refuse rather than guess ---
+            # Applies to the reranker score when RERANKER_ENABLED, else to the
+            # best primitive score (vector cosine / keyword rank) kept through
+            # fusion. 0.0 disables the check entirely.
+            low_relevance = False
+            if sources and settings.min_relevance > 0:
+                best = max(
+                    (s.score if settings.reranker_enabled else s.relevance) for s in sources
+                )
+                if best < settings.min_relevance:
+                    logger.info(
+                        "reason=relevance_floor best_score=%.3f floor=%.3f chunks=%d",
+                        best, settings.min_relevance, len(sources),
+                    )
+                    low_relevance = True
+            if low_relevance:
+                # Below the floor: skip generation entirely, refuse explicitly.
+                sources = []
+
+            sources, context, messages, prompt_chars = build_prompt(body.question, search_query, history[:-1], sources, _build_context)
             citations = [
                 Citation(
                     n=i,
@@ -224,44 +279,50 @@ async def chat(
                 ).model_dump(mode="json")
                 for i, s in enumerate(sources, start=1)
             ]
-            yield _sse({"type": "citations", "citations": citations})
-
-            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-            for msg in history[:-1]:  # exclude the just-asked question; it goes last with context
-                messages.append({"role": msg.role, "content": msg.content[:2000]})
-            messages.append(
-                {
-                    "role": "user",
-                    "content": f"CONTEXT:\n{context}\n\nQUESTION: {body.question}\n\n"
-                    "Answer using only the context. Cite excerpts as [n].",
-                }
-            )
 
             # --- LLM streaming ---
             client = llm_client()
             llm_started = time.perf_counter()
             answer_parts: list[str] = []
 
-            stream = await client.chat.completions.create(
-                model=settings.llm_model,
-                messages=messages,
-                temperature=settings.llm_temperature,
-                max_tokens=settings.llm_max_tokens,
-                stream=True,
-                stream_options={"include_usage": True},
-            )
-            async for chunk in stream:
-                if chunk.usage:
-                    prompt_tokens = chunk.usage.prompt_tokens or prompt_tokens
-                    completion_tokens = chunk.usage.completion_tokens or completion_tokens
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    answer_parts.append(delta)
-                    yield _sse({"type": "token", "value": delta})
+            if sources:
+                stream = await client.chat.completions.create(
+                    model=settings.llm_model,
+                    messages=messages,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.llm_max_tokens,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                )
+                async for chunk in stream:
+                    if chunk.usage:
+                        prompt_tokens = chunk.usage.prompt_tokens or prompt_tokens
+                        completion_tokens = chunk.usage.completion_tokens or completion_tokens
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta.content
+                    if delta:
+                        answer_parts.append(delta)
 
-            answer = "".join(answer_parts).strip()
+            draft_answer = "".join(answer_parts).strip()
+            if low_relevance:
+                result = GroundingResult(REFUSAL, [], 0, 0, "low_relevance", False)
+            else:
+                result = await verify_answer(
+                    client, body.question, draft_answer, sources, citations,
+                )
+            answer, citations, verifier_prompt, verifier_completion, refusal_reason, unverified = result
+            # Cite in order of first appearance; attach chunk identity + quote
+            # offsets for the citation inspector (enrich before renumbering so
+            # the source lookup uses the retrieval numbering).
+            citations = _enrich_citations(citations, sources)
+            answer, citations = renumber_citations(answer, citations)
+            logger.info("reason=%s prompt_chars=%d chunks=%s", refusal_reason, prompt_chars, [str(source.chunk_id) for source in sources])
+            prompt_tokens += verifier_prompt
+            completion_tokens += verifier_completion
+            yield _sse({"type": "citations", "citations": citations})
+            for offset in range(0, len(answer), 32):
+                yield _sse({"type": "token", "value": answer[offset:offset + 32]})
             llm_ms = round((time.perf_counter() - llm_started) * 1000)
             total_ms = round((time.perf_counter() - started) * 1000)
 
@@ -294,16 +355,20 @@ async def chat(
                     llm_ms=llm_ms,
                     total_ms=total_ms,
                     retrieved_chunk_ids=[str(s.chunk_id) for s in sources],
+                    refusal_reason=refusal_reason,
+                    prompt_chars=prompt_chars,
+                    draft_answer=(draft_answer[:4000] or None) if (settings.log_draft_answers if settings.log_draft_answers is not None else not settings.is_production) else None,
                 )
             )
             await db.commit()
 
+            saved_message_id = str(assistant_message.id)
             # --- Cache the fresh answer (professional) ---
-            if settings.cache_enabled and sources:
+            if settings.cache_enabled and sources and citations and refusal_reason == "ok" and not unverified:
                 try:
                     from app.services.embeddings import embed_texts
 
-                    qvec = (await embed_texts([search_query]))[0]
+                    qvec = (await embed_texts([search_query], task="query"))[0]
                     qvec_literal = "[" + ",".join(f"{x:.7g}" for x in qvec) + "]"
                     await semantic_cache.store(
                         db, owner_id, search_query, qvec_literal, answer, citations,
@@ -315,13 +380,15 @@ async def chat(
 
             yield _sse({
                 "type": "done",
-                "message_id": str(assistant_message.id),
+                "message_id": saved_message_id,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "latency_ms": total_ms,
                 "cached": False,
+                "refusal_reason": refusal_reason,
+                "unverified": unverified,
             })
-        except Exception as exc:  # noqa: BLE001 - stream errors must reach the client
+        except Exception:  # noqa: BLE001 - stream errors must reach the client
             logger.exception("Chat streaming failed")
             await db.rollback()
             # Sanitized error: internals never reach the client.
@@ -337,7 +404,7 @@ async def chat(
 @router.get("/conversations", response_model=list[ConversationOut], dependencies=[Depends(require_api_key_scope("read"))])
 async def list_conversations(
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     base = (
         select(
@@ -367,11 +434,11 @@ async def list_conversations(
     return conversations
 
 
-@router.get("/conversations/{conversation_id}", response_model=list[MessageOut])
+@router.get("/conversations/{conversation_id}", response_model=list[MessageOut], dependencies=[Depends(require_api_key_scope("read"))])
 async def get_conversation(
     conversation_id: uuidlib.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     await _get_owned_conversation(db, conversation_id, user)
     result = await db.execute(
@@ -382,11 +449,11 @@ async def get_conversation(
     return list(result.scalars().all())
 
 
-@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_jwt_session)])
 async def delete_conversation(
     conversation_id: uuidlib.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     conversation = await _get_owned_conversation(db, conversation_id, user)
     await db.delete(conversation)
@@ -396,13 +463,13 @@ async def delete_conversation(
 @router.post(
     "/messages/{message_id}/feedback",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_professional)],
+    dependencies=[Depends(require_professional), Depends(require_jwt_session)],
 )
 async def leave_feedback(
     message_id: uuidlib.UUID,
     body: FeedbackRequest,
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     """Rate an assistant answer. Only the conversation owner (or the guest who asked)
     can rate; only assistant messages accept feedback."""

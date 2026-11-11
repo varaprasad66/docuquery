@@ -15,11 +15,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install python dependencies
-COPY pyproject.toml .
-RUN pip install --no-cache-dir .
+COPY pyproject.toml constraints.txt ./
+RUN pip install --no-cache-dir -c constraints.txt .
 
 # Copy application source
 COPY . .
+
+RUN useradd --create-home --uid 10001 appuser && mkdir -p /app/uploads && chown -R appuser:appuser /app
+USER appuser
 
 # Default port
 EXPOSE 8100

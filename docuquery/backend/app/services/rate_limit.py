@@ -96,7 +96,7 @@ class LoginLockout:
     def __init__(self, max_attempts: int, lockout_seconds: int):
         self.max_attempts = max_attempts
         self.lockout_seconds = lockout_seconds
-        self._memory: dict[str, tuple[int, float]] = {}
+        self._memory: OrderedDict[str, tuple[int, float]] = OrderedDict()
 
     def _get_redis(self) -> Redis | None:
         return _redis_client()
@@ -106,16 +106,17 @@ class LoginLockout:
         redis = self._get_redis()
         if redis is not None:
             try:
+                count = int(redis.get(f"lock:{key}") or 0)
                 ttl = redis.ttl(f"lock:{key}")
-                return ttl if ttl and ttl > 0 else 0
+                return ttl if count >= self.max_attempts and ttl and ttl > 0 else 0
             except Exception:
-                pass
+                logger.warning("Login lockout store unavailable; using local fallback")
         entry = self._memory.get(key)
         if entry:
             count, locked_until = entry
             remaining = locked_until - time.time()
-            if remaining > 0:
-                return int(remaining)
+            if remaining > 0 and count >= self.max_attempts:
+                return max(1, int(remaining))
         return 0
 
     def register_failure(self, key: str) -> None:
@@ -130,11 +131,15 @@ class LoginLockout:
                     redis.expire(redis_key, self.lockout_seconds)
                 return
             except Exception:
-                pass
-        count, _ = self._memory.get(key, (0, 0.0))
-        count += 1
-        locked_until = time.time() + self.lockout_seconds if count >= self.max_attempts else 0.0
-        self._memory[key] = (count, locked_until)
+                logger.warning("Login lockout store unavailable; using local fallback")
+        now = time.time()
+        count, expires = self._memory.get(key, (0, now + self.lockout_seconds))
+        if expires <= now:
+            count, expires = 0, now + self.lockout_seconds
+        self._memory[key] = (count + 1, expires)
+        self._memory.move_to_end(key)
+        while len(self._memory) > _MEMORY_MAX_IDENTITIES:
+            self._memory.popitem(last=False)
 
     def clear(self, key: str) -> None:
         redis = self._get_redis()
@@ -142,7 +147,7 @@ class LoginLockout:
             try:
                 redis.delete(f"lock:{key}")
             except Exception:
-                pass
+                logger.warning("Login lockout store unavailable; using local fallback")
         self._memory.pop(key, None)
 
 

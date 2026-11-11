@@ -3,12 +3,14 @@ import {
   deleteConversation,
   fetchConversations,
   fetchMessages,
+  openDocumentAtPage,
   streamChat,
 } from "../api";
 import type { ChatMessage, Citation, ConversationSummary } from "../types";
 
 interface LocalMessage extends ChatMessage {
   streaming?: boolean;
+  unverified?: boolean;
   retrieval_ms?: number;
   prompt_tokens?: number;
   completion_tokens?: number;
@@ -53,7 +55,11 @@ function CitationCard({
 }) {
   return (
     <div
+      data-testid="citation-card"
       onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onClick(); } }}
       className="border border-slate-200 hover:border-indigo-300 rounded-lg p-3 bg-white hover:bg-indigo-50/20 cursor-pointer transition-all shadow-xs"
     >
       <div className="flex items-center gap-2 mb-1.5">
@@ -70,6 +76,34 @@ function CitationCard({
   );
 }
 
+function HighlightedChunk({ c }: { c: Citation }) {
+  const text = c.chunk_text ?? "";
+  const highlightable =
+    text.length > 0 && c.quote_start != null && c.quote_end != null &&
+    c.quote_start >= 0 && c.quote_end > c.quote_start && c.quote_end <= text.length;
+  return (
+    <div
+      data-testid="citation-chunk"
+      className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs leading-relaxed text-slate-700 max-h-60 overflow-y-auto whitespace-pre-wrap"
+    >
+      {highlightable ? (
+        <>
+          {text.slice(0, c.quote_start!)}
+          <mark
+            data-testid="citation-highlight"
+            className="bg-amber-200 text-slate-900 rounded-sm px-0.5"
+          >
+            {text.slice(c.quote_start!, c.quote_end!)}
+          </mark>
+          {text.slice(c.quote_end!)}
+        </>
+      ) : (
+        c.snippet || text || "No excerpt available."
+      )}
+    </div>
+  );
+}
+
 export default function ChatPage() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -77,6 +111,7 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
+  const [selectedUnverified, setSelectedUnverified] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const bottom = useRef<HTMLDivElement>(null);
@@ -168,7 +203,9 @@ export default function ChatPage() {
               m.id === assistantId
                 ? {
                     ...m,
+                    id: ev.message_id ?? m.id,
                     streaming: false,
+                    unverified: ev.unverified,
                     latency_ms: ev.latency_ms,
                     prompt_tokens: ev.prompt_tokens,
                     completion_tokens: ev.completion_tokens,
@@ -205,14 +242,17 @@ export default function ChatPage() {
     loadConversations();
   };
 
-  const handleCitationClick = (citationNum: number, currentMsgCitations: Citation[] | null) => {
+  const handleCitationClick = (citationNum: number, currentMsgCitations: Citation[] | null, unverified = false) => {
     if (!currentMsgCitations) return;
     const match = currentMsgCitations.find((c) => c.n === citationNum);
-    if (match) setSelectedCitation(match);
+    if (match) {
+      setSelectedCitation(match);
+      setSelectedUnverified(unverified);
+    }
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 grid grid-cols-[250px_1fr] gap-6 h-[calc(100vh-73px)]">
+    <div className="max-w-6xl mx-auto px-4 py-6 grid grid-cols-1 md:grid-cols-[250px_1fr] gap-6 h-[calc(100vh-73px)]">
       {/* Sidebar */}
       <aside className="flex flex-col min-h-0 bg-white border border-slate-200 rounded-xl p-3 shadow-xs">
         <button
@@ -312,9 +352,10 @@ export default function ChatPage() {
             ) : (
               <div key={m.id} className="flex flex-col gap-2.5 max-w-[85%]">
                 <div className="bg-slate-50 border border-slate-200/80 px-4 py-3.5 rounded-2xl rounded-tl-xs shadow-xs relative group">
+                  {m.unverified && <span className="text-xs text-amber-700">Unverified — review the sources</span>}
                   <AnswerBody
-                    content={m.content || "Generating answer..."}
-                    onCitationClick={(n) => handleCitationClick(n, m.citations)}
+                    content={m.content || "Preparing answer and checking sources..."}
+                    onCitationClick={(n) => handleCitationClick(n, m.citations, !!m.unverified)}
                   />
 
                   {m.streaming && (
@@ -346,7 +387,10 @@ export default function ChatPage() {
                       <CitationCard
                         key={c.n}
                         c={c}
-                        onClick={() => setSelectedCitation(c)}
+                        onClick={() => {
+                          setSelectedCitation(c);
+                          setSelectedUnverified(!!m.unverified);
+                        }}
                       />
                     ))}
                   </div>
@@ -408,16 +452,43 @@ export default function ChatPage() {
               </button>
             </div>
 
+            {selectedUnverified && (
+              <div
+                data-testid="citation-unverified"
+                className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"
+              >
+                Unverified — this citation was attributed automatically; review it before relying on it.
+              </div>
+            )}
+
             <div>
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                Retrieved Passage Excerpt
+                {selectedCitation.chunk_text ? "Indexed Chunk (supporting quote highlighted)" : "Retrieved Passage Excerpt"}
               </p>
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs leading-relaxed text-slate-700 max-h-60 overflow-y-auto whitespace-pre-wrap">
-                {selectedCitation.snippet}
-              </div>
+              <HighlightedChunk c={selectedCitation} />
             </div>
 
-            <div className="flex justify-end pt-1">
+            <div className="flex items-center justify-between pt-1">
+              {/\.pdf$/i.test(selectedCitation.document_name) ? (
+                <button
+                  onClick={() => {
+                    openDocumentAtPage(selectedCitation.document_id, selectedCitation.page).catch((e) =>
+                      window.alert(e instanceof Error ? e.message : String(e)),
+                    );
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold transition-colors"
+                  title="Open the source PDF at this page"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    <polyline points="15 3 21 3 21 9" />
+                    <line x1="10" y1="14" x2="21" y2="3" />
+                  </svg>
+                  Open page {selectedCitation.page}
+                </button>
+              ) : (
+                <span />
+              )}
               <button
                 onClick={() => setSelectedCitation(null)}
                 className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors"

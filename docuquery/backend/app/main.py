@@ -1,5 +1,5 @@
+from contextlib import asynccontextmanager
 import logging
-import time
 import uuid as uuidlib
 
 from fastapi import FastAPI, Request, status
@@ -52,9 +52,17 @@ class ErrorSanitizingMiddleware(BaseHTTPMiddleware):
             )
 
 
+@asynccontextmanager
+async def lifespan(app):
+    from app.services.ollama_health import check_ollama_context
+    await check_ollama_context()
+    yield
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
+        lifespan=lifespan,
         title=settings.app_name,
         description="Local-first document intelligence: RAG + OCR over your PDFs.",
         version="0.3.0",
@@ -76,9 +84,15 @@ def create_app() -> FastAPI:
     app.include_router(chat.router)
     app.include_router(stats.router)
     app.include_router(admin.router)  # self-gates on admin role + enterprise edition
-    app.include_router(extract.router)  # self-gates on professional edition
-    app.include_router(keys.router)  # JWT-only: API keys cannot manage keys
-    app.include_router(webhooks.router)  # JWT-only subscription management
+    if settings.integrations_enabled:
+        app.include_router(extract.router)
+        app.include_router(keys.router)
+        app.include_router(webhooks.router)
+    from pathlib import Path
+    from fastapi.staticfiles import StaticFiles
+    static = Path(__file__).resolve().parent.parent / "static"
+    if static.is_dir():
+        app.mount("/", StaticFiles(directory=static, html=True), name="frontend")
     return app
 
 

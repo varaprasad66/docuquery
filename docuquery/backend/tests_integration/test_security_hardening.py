@@ -26,7 +26,7 @@ class TestRefreshCookieLifecycle(IntegrationTestCase):
         self.assertIn("Path=/api/auth", cookie_header)
 
     async def test_cookie_refresh_with_csrf_header_rotates(self):
-        r = await self.client.post(
+        await self.client.post(
             "/api/auth/login",
             json={"email": self.email, "password": "Password12345"},
         )

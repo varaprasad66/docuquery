@@ -8,7 +8,7 @@ import logging
 import uuid as uuidlib
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from sqlalchemy import desc, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_admin_user
@@ -17,7 +17,6 @@ from app.db.models import AuditLog, Document, DocumentStatus, User
 from app.db.session import get_db
 from app.editions import require_enterprise
 from app.services.audit import record_audit
-from app.workers.tasks import process_document, process_document_core
 
 logger = logging.getLogger(__name__)
 router = APIRouter(
@@ -91,10 +90,8 @@ async def reprocess_document(
     )
     await db.commit()
     await db.refresh(doc)
-    try:
-        process_document.delay(str(doc.id))
-    except Exception:
-        background_tasks.add_task(process_document_core, str(doc.id))
+    from app.api.documents import _dispatch_processing
+    _dispatch_processing(str(doc.id), background_tasks)
     return doc
 
 

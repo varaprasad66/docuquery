@@ -1,0 +1,59 @@
+name: E2E smoke (manual)
+
+# The Playwright smoke test needs the full stack including a running LLM
+# (Ollama) for generation and embeddings, so it runs on demand against an
+# environment that provides one — not on every push.
+on:
+  workflow_dispatch:
+
+jobs:
+  playwright-smoke:
+    name: Playwright smoke (login, upload, chat)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docuquery
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Start Postgres + Redis
+        run: docker compose up db redis -d
+      - name: Install backend and start API
+        run: |
+          pip install -e "backend[dev]"
+          (cd backend && nohup python run.py &> backend.log &)
+      - name: Install frontend deps
+        run: |
+          cd frontend
+          npm ci
+          npx playwright install --with-deps chromium
+      # The workflow expects an LLM endpoint to be provided (LLM_BASE_URL /
+      # LLM_API_KEY secrets). Without one, set up Ollama:
+      - name: Start Ollama and pull the model
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          (nohup ollama serve &> ollama.log &)
+          sleep 5
+          ollama pull qwen2.5:3b
+          ollama pull nomic-embed-text
+      - name: Apply migrations
+        run: (cd backend && alembic upgrade head)
+      - name: Start frontend dev server
+        run: |
+          cd frontend
+          (nohup npm run dev &> vite.log &)
+          sleep 8
+      - name: Run the smoke test
+        run: |
+          cd frontend
+          npx playwright test
+      - name: Dump backend log on failure
+        if: failure()
+        run: tail -50 docuquery/backend/backend.log

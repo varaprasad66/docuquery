@@ -46,7 +46,7 @@ async def rewrite_question(question: str, history: list[Message]) -> str:
         client = llm_client()
         response = await asyncio.wait_for(
             client.chat.completions.create(
-                model=s.llm_model,
+                model=s.rewriter_model or s.llm_model,
                 messages=[
                     {"role": "system", "content": _REWRITE_SYSTEM},
                     {
@@ -61,8 +61,8 @@ async def rewrite_question(question: str, history: list[Message]) -> str:
             timeout=s.query_rewrite_timeout_seconds,
         )
         rewritten = (response.choices[0].message.content or "").strip()
-    except Exception as exc:
-        logger.warning("Query rewrite failed (%s); using the original question", exc)
+    except Exception:
+        logger.warning("Query rewrite failed; reason=rewriter_unavailable")
         return question
 
     if not rewritten or len(rewritten) > 1000 or "\n\n" in rewritten:

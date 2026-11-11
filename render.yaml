@@ -1,0 +1,74 @@
+# REVIEW BEFORE APPLYING: managed services incur charges.
+# Create the docuquery-secrets environment group first (docs/deployment.md).
+services:
+  - type: web
+    name: docuquery
+    runtime: docker
+    plan: "0.5c-512mb"
+    region: singapore
+    dockerfilePath: ./docuquery/Dockerfile.render
+    dockerContext: ./docuquery
+    healthCheckPath: /api/health/ready
+    preDeployCommand: python -m alembic upgrade head
+    autoDeployTrigger: "off"
+    envVars: &application
+      - fromGroup: docuquery-secrets
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "False"
+      - key: HTTPS_ENABLED
+        value: "True"
+      - key: USE_CELERY
+        value: "True"
+      - key: STORAGE_BACKEND
+        value: supabase
+      - key: CACHE_ENABLED
+        value: "False"
+      - key: URL_IMPORT_ENABLED
+        value: "False"
+      - key: REGISTRATION_ENABLED
+        value: "False"
+      - key: INTEGRATIONS_ENABLED
+        value: "False"
+      - key: MAX_UPLOAD_MB
+        value: "10"
+      - key: MAX_DAILY_QUESTIONS
+        value: "20"
+      - key: MAX_UPLOADS_PER_DAY
+        value: "10"
+      - key: DB_POOL_SIZE
+        value: "3"
+      - key: DB_MAX_OVERFLOW
+        value: "1"
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: docuquery-queue
+          property: connectionString
+  - type: worker
+    name: docuquery-worker
+    runtime: docker
+    plan: "1c-2g"
+    region: singapore
+    dockerfilePath: ./docuquery/backend/Dockerfile
+    dockerContext: ./docuquery/backend
+    dockerCommand: celery -A app.workers.celery_app worker -l info --concurrency=2
+    autoDeployTrigger: "off"
+    envVars: *application
+  - type: worker
+    name: docuquery-scheduler
+    runtime: docker
+    plan: "256mb"
+    region: singapore
+    dockerfilePath: ./docuquery/backend/Dockerfile
+    dockerContext: ./docuquery/backend
+    dockerCommand: celery -A app.workers.celery_app beat -l info --schedule=/tmp/celerybeat-schedule
+    autoDeployTrigger: "off"
+    envVars: *application
+  - type: keyvalue
+    name: docuquery-queue
+    plan: "256mb"
+    region: singapore
+    ipAllowList: []
+    maxmemoryPolicy: noeviction

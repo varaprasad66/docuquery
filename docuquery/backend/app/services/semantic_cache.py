@@ -12,11 +12,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.db.models import SemanticCacheEntry
+from app.db.models import SemanticCacheEntry, Document, DocumentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,11 @@ class CacheHit:
 
 def scope_hash(owner_id: UUID | None, document_ids: list[str] | None = None) -> str:
     """Tenant scope fingerprint. Guest scope is distinct from any user scope."""
-    raw = f"owner:{owner_id or 'guest'}|docs:{sorted(document_ids or [])}"
+    s = get_settings()
+    from app.services.llm import SYSTEM_PROMPT
+    from app.services.grounding import VERIFIER_PROMPT
+    prompt_version = hashlib.sha256((SYSTEM_PROMPT + VERIFIER_PROMPT).encode()).hexdigest()
+    raw = f"prompt:{prompt_version}|model:{s.llm_base_url}:{s.llm_model}|embedding:{s.embeddings_model}:{s.embed_dim}|owner:{owner_id or 'guest'}|docs:{sorted(document_ids or [])}"
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 
@@ -55,6 +59,7 @@ async def lookup(
                        completion_tokens, (question_embedding <=> CAST(:qvec AS vector)) AS dist
                 FROM semantic_cache
                 WHERE scope_hash = :scope AND expires_at > now()
+                  AND question = :question
                   AND question_embedding IS NOT NULL
                 ORDER BY question_embedding <=> CAST(:qvec AS vector)
                 LIMIT 1
@@ -63,11 +68,19 @@ async def lookup(
             {
                 "qvec": query_vector_literal,
                 "scope": scope_hash(owner_id, document_ids),
+                "question": question,
             },
         )
         row = rows.first()
         if row is None or float(row.dist) > threshold_distance:
             return None
+        # Re-check every cited source: cache entries are never an authorization grant.
+        for citation in row.citations or []:
+            doc = await db.get(Document, UUID(str(citation.get("document_id"))))
+            if doc is None or doc.status != DocumentStatus.ready:
+                return None
+            if (not get_settings().public_document_sharing_enabled or doc.visibility != "public") and (owner_id is None or doc.owner_id != owner_id):
+                return None
         await db.execute(
             text("UPDATE semantic_cache SET hit_count = hit_count + 1 WHERE id = :id"),
             {"id": row.id},
@@ -82,6 +95,7 @@ async def lookup(
         )
     except Exception:
         logger.warning("Semantic cache lookup failed; bypassing cache", exc_info=True)
+        await db.rollback()
         return None
 
 
@@ -128,6 +142,7 @@ async def store(
         await db.commit()
     except Exception:
         logger.warning("Semantic cache store failed", exc_info=True)
+        await db.rollback()
 
 
 async def invalidate_all(db: AsyncSession) -> None:

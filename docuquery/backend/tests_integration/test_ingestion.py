@@ -71,7 +71,7 @@ class TestIngestionPipeline(IntegrationTestCase):
         await self.process_document(doc["id"])
         ready = await self.wait_ready(doc["id"], self.token)
         self.assertEqual(ready["status"], "failed")
-        self.assertIn("assword", ready["error"])  # readable message, not a stack trace
+        self.assertEqual(ready["error"], "Document processing failed. Please retry or contact support.")  # readable message, not a stack trace
 
     async def test_delete_document_cascades_chunks_and_removes_from_search(self):
         doc = await self.upload_pdf(self.token, filename="deleteme.pdf", text="Zeppelin unique content xyzz y.")
@@ -205,8 +205,12 @@ class TestMultiFormatIngestion(IntegrationTestCase):
         )
         results = r.json()["results"]
         self.assertTrue(results)
-        hit = next(x for x in results if x["document_name"] == "payroll.xlsx")
-        self.assertEqual(hit["location"], "Sheet 'Payroll' rows 52-61")
+        # The Emp-57 chunk must be found with its exact row-range location.
+        # (Its rank may vary with embedding settings; location must not.)
+        hit = next(
+            x for x in results
+            if x["document_name"] == "payroll.xlsx" and x["location"] == "Sheet 'Payroll' rows 52-61"
+        )
         self.assertIn("Columns: Employee | Salary", hit["snippet"])
 
     async def test_md_upload_search(self):

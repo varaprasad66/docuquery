@@ -93,7 +93,7 @@ class TestTenantIsolation(IntegrationTestCase):
         r = await self.client.post(f"/api/documents/{doc_id}/retry")
         self.assertEqual(r.status_code, 401)
 
-    async def test_making_document_public_exposes_it_to_others(self):
+    async def test_public_label_does_not_expose_document_in_strict_mode(self):
         doc_id = self.alice_doc["id"]
         r = await self.client.patch(
             f"/api/documents/{doc_id}/visibility",
@@ -107,7 +107,7 @@ class TestTenantIsolation(IntegrationTestCase):
             headers=self.auth_headers(self.bob_token),
         )
         names = [x["document_name"] for x in r.json()["results"]]
-        self.assertIn("alice-private-salary.pdf", names)
+        self.assertNotIn("alice-private-salary.pdf", names)
 
     async def test_visibility_change_requires_owner(self):
         doc_id = self.alice_doc["id"]
@@ -118,16 +118,9 @@ class TestTenantIsolation(IntegrationTestCase):
         )
         self.assertEqual(r.status_code, 404)
 
-    async def test_guest_uploads_are_private_and_invisible_to_users(self):
-        doc = await self.upload_pdf(None, filename="guest-note.pdf", text="Guest private note.")
-        await self.process_document(doc["id"])
-        r = await self.client.get("/api/documents", headers=self.auth_headers(self.bob_token))
-        names = [d["original_name"] for d in r.json()]
-        self.assertNotIn("guest-note.pdf", names)
-        # Guests themselves see their own (unowned) uploads via the public listing.
-        r = await self.client.get("/api/documents")
-        names = [d["original_name"] for d in r.json()]
-        self.assertIn("guest-note.pdf", names)
+    async def test_guest_upload_rejected(self):
+        r = await self.client.post("/api/documents", files={"file": ("guest.pdf", make_pdf(), "application/pdf")})
+        self.assertEqual(r.status_code, 401)
 
     async def test_conversations_are_scoped_per_user(self):
         events = await self.chat_sse("Hello there", token=self.alice_token)
@@ -148,13 +141,11 @@ class TestTenantIsolation(IntegrationTestCase):
         ids = [c["id"] for c in r.json()]
         self.assertNotIn(conv_id, ids)
 
-    async def test_guest_conversation_invisible_to_authenticated_users(self):
-        events = await self.chat_sse("Guest question here")
-        conv_id = next(e for e in events if e["type"] == "meta")["conversation_id"]
-        r = await self.client.get(
-            f"/api/conversations/{conv_id}", headers=self.auth_headers(self.bob_token)
-        )
-        self.assertEqual(r.status_code, 404)
+    async def test_guest_chat_and_history_rejected(self):
+        r = await self.client.post("/api/chat", json={"question": "Guest question"})
+        self.assertEqual(r.status_code, 401)
+        r = await self.client.get("/api/conversations")
+        self.assertEqual(r.status_code, 401)
 
     async def test_stats_scope_never_crosses_users(self):
         # Alice asks a question (logs a query row under her owner_id).

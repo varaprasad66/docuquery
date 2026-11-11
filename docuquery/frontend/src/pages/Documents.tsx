@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { deleteDocument, fetchDocuments, importDocumentFromUrl, retryDocument, uploadDocument } from "../api";
+import { deleteDocument, fetchConfig, fetchDocuments, importDocumentFromUrl, reembedDocument, retryDocument, uploadDocument } from "../api";
 import type { DocRecord } from "../types";
 
 const ACCEPTED_TYPES =
@@ -14,15 +14,36 @@ function formatSize(bytes: number): string {
 function StatusBadge({
   doc,
   onRetry,
+  onReembed,
 }: {
   doc: DocRecord;
   onRetry: (id: string) => void;
+  onReembed: (id: string) => void;
 }) {
   if (doc.status === "ready") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Ready
-      </span>
+      <div className="flex items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Ready
+        </span>
+        {doc.degraded && (
+          <div className="flex items-center gap-2">
+            <span
+              title="Embedding failed during processing — this document is searchable by keyword only. Re-embed to restore semantic search."
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full cursor-help"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> keyword-only
+            </span>
+            <button
+              onClick={() => onReembed(doc.id)}
+              className="text-xs font-medium text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-0.5 rounded transition-colors"
+              title="Re-run embedding for this document"
+            >
+              Re-embed
+            </button>
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -65,6 +86,8 @@ function StatusBadge({
 }
 
 export default function DocumentsPage() {
+  const [config, setConfig] = useState({ max_upload_mb: 10, url_import_enabled: false });
+  useEffect(() => { fetchConfig().then(setConfig).catch(() => undefined); }, []);
   const [docs, setDocs] = useState<DocRecord[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +141,15 @@ export default function DocumentsPage() {
     }
   };
 
+  const handleReembed = async (id: string) => {
+    try {
+      await reembedDocument(id);
+      load();
+    } catch (e) {
+      setError(`Re-embed failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
   const handleImportUrl = async (e: React.FormEvent) => {
     e.preventDefault();
     const url = urlValue.trim();
@@ -136,6 +168,8 @@ export default function DocumentsPage() {
   };
 
   const remove = async (id: string) => {
+    const document = docs.find((item) => item.id === id);
+    if (!window.confirm(`Delete "${document?.original_name ?? "this document"}"? It will no longer be available for questions. This cannot be undone.`)) return;
     try {
       await deleteDocument(id);
       setDocs((prev) => prev.filter((d) => d.id !== id));
@@ -202,13 +236,13 @@ export default function DocumentsPage() {
               Drop files here, or click to browse
             </p>
             <p className="text-xs text-slate-400">
-              Supports PDF, DOCX, PPTX, XLSX, HTML, TXT and MD up to 50 MB · Ingestion with OCR and hybrid pgvector indexing
+              Supports PDF, DOCX, PPTX, XLSX, HTML, TXT and MD up to {config.max_upload_mb} MB · Searchable text and scanned PDFs
             </p>
           </div>
         )}
       </div>
 
-      <form onSubmit={handleImportUrl} className="flex gap-2 mb-6">
+      {config.url_import_enabled && <form onSubmit={handleImportUrl} className="flex gap-2 mb-6">
         <input
           type="url"
           required
@@ -224,7 +258,7 @@ export default function DocumentsPage() {
         >
           {importingUrl ? "Importing…" : "Import URL"}
         </button>
-      </form>
+      </form>}
 
       {error && (
         <div className="mb-4 rounded-lg bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700 flex items-center justify-between">
@@ -258,7 +292,7 @@ export default function DocumentsPage() {
                 {" · "}{new Date(doc.created_at).toLocaleDateString()}
               </p>
             </div>
-            <StatusBadge doc={doc} onRetry={handleRetry} />
+            <StatusBadge doc={doc} onRetry={handleRetry} onReembed={handleReembed} />
             <button
               onClick={() => remove(doc.id)}
               className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 rounded-md hover:bg-rose-50 shrink-0"

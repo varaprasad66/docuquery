@@ -2,7 +2,7 @@
 
 import unittest
 import uuid
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from app.db.models import Document, DocumentStatus, User
 from app.services.security import (
@@ -32,6 +32,9 @@ def _doc(owner_id: uuid.UUID | None, visibility: str) -> Document:
 
 class TestAccessMatrix(unittest.TestCase):
     def setUp(self):
+        sharing = patch("app.services.security.get_settings", return_value=MagicMock(public_document_sharing_enabled=True))
+        sharing.start()
+        self.addCleanup(sharing.stop)
         self.admin = _user("admin")
         self.alice = _user("user")
         self.bob = _user("user")
@@ -87,16 +90,16 @@ class TestAccessMatrix(unittest.TestCase):
         self.assertFalse(is_admin(self.alice))
         self.assertFalse(is_admin(None))
 
-    def test_scope_clause_guest_is_public_plus_guest_space(self):
+    def test_scope_clause_guest_is_public_only(self):
         clause = scope_clause(None)
         self.assertIn("d.visibility = 'public'", clause)
-        self.assertIn("d.owner_id IS NULL", clause)
+        self.assertNotIn("d.owner_id IS NULL", clause)
 
     def test_guest_space_private_docs_hidden_from_users(self):
         # Unowned private documents (guest uploads) are invisible to accounts:
         # neither public nor owner-matched for an authenticated user.
         guest_upload = _doc(None, "private")
-        self.assertTrue(can_read(None, guest_upload), "guests read the guest space")
+        self.assertFalse(can_read(None, guest_upload), "unowned private files are never shared")
         self.assertFalse(can_read(self.bob, guest_upload))
         self.assertTrue(can_read(self.admin, guest_upload))
 
@@ -109,3 +112,14 @@ class TestAccessMatrix(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestStrictIsolation(unittest.TestCase):
+    def test_public_label_does_not_bypass_account_boundary(self):
+        alice, bob = _user(), _user()
+        doc = _doc(alice.id, "public")
+        with patch("app.services.security.get_settings", return_value=MagicMock(public_document_sharing_enabled=False)):
+            self.assertTrue(can_read(alice, doc))
+            self.assertFalse(can_read(bob, doc))
+            self.assertFalse(can_read(None, doc))
+            self.assertEqual(scope_clause(None), "FALSE")
+            self.assertNotIn("public", scope_clause(bob.id))

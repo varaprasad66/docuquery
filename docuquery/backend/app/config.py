@@ -1,5 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
+from pydantic import Field
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -34,6 +36,23 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.2
     llm_max_tokens: int = 1024
 
+    # Grounding and prompt controls (Phase 1)
+    grounding_mode: Literal["strict", "soft"] = "soft"
+    grounding_auto_attribution: bool = True
+    grounding_similarity_threshold: float = Field(default=0.55, ge=0, le=1)
+    grounding_fuzzy_quotes: bool = True
+    grounding_quote_threshold: float = Field(default=85, ge=0, le=100)
+    verifier_timeout_seconds: float = Field(default=30, gt=0)
+    verifier_model: str | None = None
+    rewriter_model: str | None = None
+    log_draft_answers: bool | None = None  # None: enabled locally, disabled in production
+    prompt_budget_enabled: bool = True
+    history_limit: int = Field(default=4, ge=0, le=30)
+    history_max_chars: int = Field(default=800, ge=0)
+    llm_context_budget_tokens: int = Field(default=6000, ge=256)
+    ollama_context_check: bool = True
+    answer_include_rewritten_question: bool = True
+
     # Cost analytics (USD per 1k tokens; 0 for free local models)
     llm_cost_prompt_per_1k: float = 0.0
     llm_cost_completion_per_1k: float = 0.0
@@ -45,7 +64,18 @@ class Settings(BaseSettings):
     embed_dim: int = 768
 
     # Infrastructure
-    database_url: str = "postgresql+psycopg://docuquery:docuquery@localhost:5433/docuquery"
+    database_url: str = "postgresql+psycopg://docuquery:docuquery@127.0.0.1:5433/docuquery"
+    migration_database_url: str | None = None
+    db_pool_size: int = 5
+    db_max_overflow: int = 2
+    db_pool_timeout: int = 15
+    storage_backend: str = "local"
+    supabase_url: str = ""
+    supabase_secret_key: str = ""
+    supabase_storage_bucket: str = "documents"
+    public_document_sharing_enabled: bool = False
+    registration_enabled: bool = True
+    integrations_enabled: bool = True
     redis_url: str = "redis://localhost:6379/0"
     use_celery: bool = False  # By default in dev, use in-process BackgroundTasks to avoid hung queues
 
@@ -62,7 +92,7 @@ class Settings(BaseSettings):
     xlsx_rows_per_section: int = 50  # rows per chunk section; header is repeated
 
     # URL import (POST /api/documents/url)
-    url_import_enabled: bool = True
+    url_import_enabled: bool = False
     url_fetch_timeout_seconds: int = 20
 
     # Retrieval quality
@@ -72,9 +102,41 @@ class Settings(BaseSettings):
     query_rewrite_timeout_seconds: int = 8
     # Optional local cross-encoder reranker (needs the `sentence-transformers`
     # extra: pip install -e ".[rerank]"). Disabled by default; any failure
-    # falls back to the fused RRF order.
+    # falls back to the fused RRF order. "BAAI/bge-reranker-base" is a tested
+    # alternative RERANKER_MODEL.
     reranker_enabled: bool = False
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_candidates: int = Field(default=20, ge=1, le=100)  # candidate pool when reranking
+    # Relevance floor: 0.0 disables (never refuses previously-answerable cases).
+    # When RERANKER_ENABLED it applies to the (sigmoid-normalized) reranker score,
+    # otherwise to the best vector cosine similarity. Below the floor the chat
+    # returns a refusal with reason "low_relevance" instead of guessing.
+    min_relevance: float = Field(default=0.0, ge=0, le=1)
+    # Neighbor expansion: after final ranking, attach the previous/next chunk
+    # (same document, by chunk_index) to each hit so answers spanning a chunk
+    # boundary keep their context. Citations still point at the hit chunk.
+    neighbor_expansion: bool = True
+    neighbor_window: int = Field(default=1, ge=0, le=3)
+    # Keyword leg: drop stop words and build the tsquery with
+    # websearch_to_tsquery (never raises on odd input) instead of raw to_tsquery.
+    keyword_websearch_tsquery: bool = True
+
+    # Embedding task prefixes. nomic-embed-text was trained with
+    # "search_document: " / "search_query: " task prompts; empty both for other
+    # models. Changing either requires a reindex (scripts/reindex_embeddings.py).
+    embed_doc_prefix: str = "search_document: "
+    embed_query_prefix: str = "search_query: "
+    # Version tag written to chunks.embedding_model so stale vectors can be
+    # detected and re-indexed (e.g. "nomic-embed-text+prefix-v1").
+    embedding_version_tag: str = "prefix-v1"
+    # Prepend "Document: <name> | <location>" to the text sent to the embedder
+    # (display/storage text stays clean).
+    contextual_embeddings: bool = True
+
+    # PDF extraction: "plain" (PyMuPDF text layer + OCR fallback) or
+    # "markdown" (pymupdf4llm layout-aware Markdown, headings/tables survive;
+    # no OCR fallback in this mode).
+    pdf_extractor: Literal["plain", "markdown"] = "plain"
 
     # Structured extraction (professional edition). Chunks per document fed to
     # the model, in document order; extraction answers get their own token cap.
@@ -113,8 +175,8 @@ class Settings(BaseSettings):
     password_min_length: int = 10
     login_max_attempts: int = 5
     login_lockout_seconds: int = 900  # 15 minutes
-    # Emails listed here are created with the admin role at registration.
-    admin_emails: list[str] = []
+    # NOTE: there is deliberately no email-allowlist admin registration.
+    # Privilege is provisioned out-of-band by the operator (scripts/promote_admin.py).
 
     # Rate limiting (requests per window, per identity)
     rate_limit_auth: int = 10
@@ -128,7 +190,7 @@ class Settings(BaseSettings):
     max_uploads_per_day: int = 0
 
     # Semantic answer cache (professional edition). Reduces duplicate-question cost.
-    cache_enabled: bool = True
+    cache_enabled: bool = False
     cache_ttl_minutes: int = 60
     cache_similarity_threshold: float = 0.92  # cosine similarity required for a hit
 
@@ -149,7 +211,7 @@ def _validate_production(settings: "Settings") -> None:
     """Refuse to boot a production deployment with insecure configuration."""
     if not settings.is_production:
         return
-    if settings.jwt_secret == "change-me-in-production":
+    if settings.jwt_secret == "change-me-in-production":  # nosec B105 - reject development sentinel
         raise RuntimeError(
             "Refusing to start in production with the default JWT_SECRET. "
             "Set a strong JWT_SECRET in the environment."
@@ -168,7 +230,7 @@ def _validate_production(settings: "Settings") -> None:
             after_scheme = database_url.split("://", 1)[1]
             password = after_scheme.split("@", 1)[0].split(":", 1)[1]
         except IndexError:
-            password = ""
+            password = ""  # nosec B105 - missing credential detection
         if password.strip() in ("", "docuquery", "postgres", "password", "changeme"):
             raise RuntimeError(
                 "Refusing to start in production with a weak/default database "
@@ -187,6 +249,7 @@ def get_settings() -> Settings:
     _validate_production(settings)
     try:
         settings.upload_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+    except OSError:
+        if settings.storage_backend == "local":
+            raise
     return settings

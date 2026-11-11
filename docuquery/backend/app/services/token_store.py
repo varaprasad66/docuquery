@@ -5,9 +5,15 @@ in-process fallback (bounded) when Redis is unavailable.
 """
 
 import time
+import logging
+from app.config import get_settings
+from fastapi import HTTPException
+
 from collections import OrderedDict
 
 from app.services.rate_limit import _redis_client
+
+logger = logging.getLogger(__name__)
 
 _MEMORY_MAX = 10_000
 
@@ -24,7 +30,9 @@ class TokenBlacklist:
                 redis.setex(f"jti:{jti}", ttl, "1")
                 return
             except Exception:
-                pass
+                logger.warning("Revocation store unavailable")
+        if get_settings().is_production:
+            raise HTTPException(503, "Session service temporarily unavailable.")
         self._memory[jti] = expires_at_epoch
         self._memory.move_to_end(jti)
         while len(self._memory) > _MEMORY_MAX:
@@ -36,7 +44,9 @@ class TokenBlacklist:
             try:
                 return redis.exists(f"jti:{jti}") > 0
             except Exception:
-                pass
+                logger.warning("Revocation store unavailable")
+        if get_settings().is_production:
+            raise HTTPException(503, "Session service temporarily unavailable.")
         self._evict()
         return jti in self._memory
 

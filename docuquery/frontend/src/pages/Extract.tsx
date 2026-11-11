@@ -8,7 +8,7 @@ interface TemplateInfo {
 }
 
 function flattenValue(v: unknown): string {
-  if (v === null || v === undefined) return "—";
+  if (v === null || v === undefined) return "Not found in document";
   if (typeof v === "object") return JSON.stringify(v, null, 1);
   return String(v);
 }
@@ -24,7 +24,11 @@ function toCsv(result: ExtractResult): string {
     rows.push([`_source:${c.field}`, `${c.document_name} · ${c.location}`]);
   }
   return rows
-    .map((r) => r.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(","))
+    .map((r) => r.map((cell) => {
+      // Quoting alone does not prevent spreadsheet formula execution.
+      const safe = /^[\s]*[=+@-]/.test(cell) ? `'${cell}` : cell;
+      return `"${safe.replace(/"/g, '""')}"`;
+    }).join(","))
     .join("\n");
 }
 
@@ -57,7 +61,7 @@ export default function ExtractPage() {
     load();
     fetchExtractionTemplates()
       .then(setTemplates)
-      .catch(() => setTemplates({}));
+      .catch(() => setError("Extraction templates could not be loaded. Check the connection and reload this page."));
   }, [load]);
 
   const readyDocs = useMemo(() => docs.filter((d) => d.status === "ready"), [docs]);
@@ -80,22 +84,33 @@ export default function ExtractPage() {
 
   const fields = result ? Object.entries(result.data ?? {}) : [];
   const citations = result?.citations ?? [];
+  const expectedFields = Object.keys((templates[template]?.schema?.properties ?? {}) as Record<string, unknown>);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
       <div className="mb-6">
         <h2 className="text-xl font-bold text-slate-900">Extract</h2>
         <p className="text-sm text-slate-500 mt-0.5">
-          Pull structured fields out of a document with a template — results include per-field source citations.
+          Turn invoices or contracts into structured data you can export to a spreadsheet or another application.
         </p>
       </div>
+
+      <div className="mb-5 rounded-lg border border-indigo-100 bg-indigo-50 p-4 text-sm text-slate-700">
+        <p>1. Upload a matching document and wait for Ready. 2. Choose its template. 3. Extract, review the values and sources, then export CSV or JSON.</p>
+        <p className="mt-2 text-xs">Use Chat for questions about research papers or handbooks. Extract is for repeatable fields such as invoice totals or contract dates. Missing information should remain empty; always check important values against the original.</p>
+      </div>
+
+      <button type="button" onClick={load} disabled={busy} className="mb-3 text-sm font-semibold text-indigo-700 disabled:opacity-40">Refresh document list</button>
+      {readyDocs.length === 0 && <p className="mb-4 text-sm text-slate-500">No ready documents yet. Upload a document in Documents, then refresh this list.</p>}
 
       <form onSubmit={run} className="flex flex-wrap items-end gap-3 mb-6">
         <div className="flex-1 min-w-[220px]">
           <label className="block text-xs font-semibold text-slate-700 mb-1">Document</label>
           <select
             value={docId}
-            onChange={(e) => setDocId(e.target.value)}
+            disabled={busy}
+            onChange={(e) => { setDocId(e.target.value); setResult(null); setError(null); }}
+            aria-label="Document to extract"
             className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
             <option value="">Choose a ready document…</option>
@@ -110,7 +125,9 @@ export default function ExtractPage() {
           <label className="block text-xs font-semibold text-slate-700 mb-1">Template</label>
           <select
             value={template}
-            onChange={(e) => setTemplate(e.target.value)}
+            disabled={busy}
+            onChange={(e) => { setTemplate(e.target.value); setResult(null); setError(null); }}
+            aria-label="Extraction template"
             className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
             {Object.keys(templates).length === 0 && <option value="invoice">invoice</option>}
@@ -123,12 +140,14 @@ export default function ExtractPage() {
         </div>
         <button
           type="submit"
-          disabled={busy || !docId}
+          disabled={busy || !docId || !templates[template]}
           className="text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg px-5 py-2.5 transition-colors"
         >
           {busy ? "Extracting…" : "Extract"}
         </button>
       </form>
+
+      {expectedFields.length > 0 && <p className="mb-5 text-xs text-slate-500">Fields to extract: {expectedFields.map(name => name.replaceAll("_", " ")).join(", ")}.</p>}
 
       {error && (
         <div className="mb-4 rounded-lg bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700">
@@ -152,7 +171,7 @@ export default function ExtractPage() {
                       : "text-rose-700 bg-rose-50 border-rose-200"
                 }`}
               >
-                confidence: {result.confidence}
+                model confidence: {result.confidence} (not verified)
               </span>
             </div>
             <div className="flex gap-2">
@@ -175,9 +194,12 @@ export default function ExtractPage() {
             <tbody>
               {fields.map(([key, value]) => (
                 <tr key={key} className="border-b border-slate-100 last:border-0">
-                  <td className="px-4 py-2.5 font-semibold text-slate-700 w-1/3 align-top">{key}</td>
+                  <td className="px-4 py-2.5 font-semibold text-slate-700 w-1/3 align-top">{key.replaceAll("_", " ")}</td>
                   <td className="px-4 py-2.5 text-slate-600 whitespace-pre-wrap font-mono text-xs">
                     {flattenValue(value)}
+                    {citations.filter(c => c.field === key).map((c, index) => (
+                      <p key={index} className="mt-1 font-sans text-xs text-slate-500">Source: {c.document_name} · {c.location}</p>
+                    ))}
                   </td>
                 </tr>
               ))}

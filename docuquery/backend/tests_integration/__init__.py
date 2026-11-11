@@ -29,15 +29,17 @@ _TEST_UPLOAD_DIR = Path(tempfile.gettempdir()) / "docuquery_test_uploads"
 os.environ["UPLOAD_DIR"] = str(_TEST_UPLOAD_DIR)
 
 TEST_DATABASE_URL = (
-    f"postgresql+psycopg://docuquery:docuquery@localhost:5433/{TEST_DB_NAME}"
+    f"postgresql+psycopg://docuquery:docuquery@127.0.0.1:5433/{TEST_DB_NAME}"
 )
-SERVER_DATABASE_URL = "postgresql+psycopg://docuquery:docuquery@localhost:5433/docuquery"
+SERVER_DATABASE_URL = "postgresql+psycopg://docuquery:docuquery@127.0.0.1:5433/docuquery"
 
 # Must be set before ANY app module is imported (config caches the URL).
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["ENVIRONMENT"] = "local"
 os.environ["EDITION"] = "enterprise"
 os.environ["CACHE_ENABLED"] = "True"
+os.environ["URL_IMPORT_ENABLED"] = "True"
+os.environ["JWT_SECRET"] = "test-only-secret-at-least-thirty-two-bytes-long"
 
 import hashlib  # noqa: E402
 import io  # noqa: E402
@@ -107,10 +109,16 @@ def _ensure_schema() -> None:
             )
         )
         # Self-healing for columns added after this test database was first created
-        # (create_all does not ALTER existing tables).
+        # (create_all does not ALTER existing tables). Mirrors migrations 0003+0007+0008.
         conn.execute(text("ALTER TABLE chunks ADD COLUMN IF NOT EXISTS location VARCHAR(255)"))
         conn.execute(
             text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_url VARCHAR(2048)")
+        )
+        conn.execute(text("ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS refusal_reason VARCHAR(64)"))
+        conn.execute(text("ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS draft_answer TEXT"))
+        conn.execute(text("ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS prompt_chars INTEGER"))
+        conn.execute(
+            text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS degraded BOOLEAN NOT NULL DEFAULT false")
         )
     engine.dispose()
 
@@ -138,11 +146,11 @@ def _fake_vector(text: str) -> list[float]:
     return [x / norm for x in vec]
 
 
-def fake_embed_texts(texts: list[str]) -> list[list[float]]:
+def fake_embed_texts(texts: list[str], task: str | None = None) -> list[list[float]]:
     return [_fake_vector(t) for t in texts]
 
 
-def fake_embed_texts_sync(texts: list[str]) -> list[list[float]]:
+def fake_embed_texts_sync(texts: list[str], task: str | None = None) -> list[list[float]]:
     return [_fake_vector(t) for t in texts]
 
 
@@ -152,6 +160,14 @@ class _FakeCompletions:
     answer = "The handbook states 25 days of PTO per year [1]."
 
     async def create(self, **kwargs):
+        if kwargs.get("stream") is False:
+            # Deterministic transport fake only; semantic quality is tested with real AI separately.
+            import json
+            from types import SimpleNamespace
+            payload = json.loads(kwargs["messages"][-1]["content"])
+            evidence = [{"n": source["n"], "quote": source["text"]} for source in payload["sources"]]
+            return SimpleNamespace(usage=None, choices=[SimpleNamespace(message=SimpleNamespace(
+                content=json.dumps({"supported": True, "evidence": evidence})))])
         class _Completion:
             def __init__(self, outer):
                 self.outer = outer
@@ -159,10 +175,9 @@ class _FakeCompletions:
                 self.choices = []
                 self._sent = 0
 
-        obj = _Completion(self)
+        _Completion(self)
 
         async def _gen():
-            usage_sent = False
             for word in _FakeCompletions.answer.split(" "):
                 chunk = type("C", (), {})()
                 chunk.usage = None
@@ -256,7 +271,7 @@ def patch_embeds_everywhere() -> None:
     import app.services.embeddings as emb
     import app.services.retrieval as retrieval
 
-    async def _async_embed(texts):
+    async def _async_embed(texts, task: str | None = None):
         return fake_embed_texts(texts)
 
     chat_api.embed_texts = _async_embed
@@ -268,14 +283,18 @@ def patch_embeds_everywhere() -> None:
 class IntegrationTestCase(unittest.IsolatedAsyncioTestCase):
     """Base: fresh HTTP client per test against the real app + test DB."""
 
+    loop_factory = asyncio.SelectorEventLoop if sys.platform == "win32" else None
+
     async def asyncSetUp(self):
         if not SCHEMA_READY:
-            self.skipTest(f"Test database unavailable: {_BOOTSTRAP_ERROR}")
+            self.fail(f"Mandatory test database unavailable: {_BOOTSTRAP_ERROR}")
         import httpx
         from sqlalchemy import text
 
         from app.db.session import engine
 
+        if engine.url.database != TEST_DB_NAME or engine.url.host not in ("localhost", "127.0.0.1"):
+            raise RuntimeError("Refusing test cleanup outside the disposable local database")
         force_memory_backends()
         patch_ai_fakes()
         patch_embeds_everywhere()

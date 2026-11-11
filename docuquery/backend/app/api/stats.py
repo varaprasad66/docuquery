@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import case, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_current_user_optional_dep, require_api_key_scope
+from app.api.dependencies import get_current_user, require_api_key_scope
 from app.api.schemas import (
     CacheStats,
     DailyUsagePoint,
@@ -44,7 +44,7 @@ def _log_scope(user: User | None):
 @router.get("", response_model=StatsOverview)
 async def get_stats(
     db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_current_user_optional_dep),
+    user: User | None = Depends(get_current_user),
 ):
     settings = get_settings()
     scope_where = _log_scope(user)
@@ -60,6 +60,8 @@ async def get_stats(
                 Document.owner_id == user.id,
                 Document.visibility == "public",
             )
+            if not settings.public_document_sharing_enabled:
+                doc_where = Document.owner_id == user.id
         elif user is None:
             from sqlalchemy import or_
 
@@ -156,6 +158,8 @@ async def get_stats(
         ).select_from(Message).join(Conversation, Conversation.id == Message.conversation_id)
         if user is not None and not is_admin(user):
             fb_query = fb_query.where(Conversation.owner_id == user.id)
+            if not settings.public_document_sharing_enabled:
+                doc_where = Document.owner_id == user.id
         elif user is None:
             fb_query = fb_query.where(Conversation.owner_id.is_(None))
         fb_row = (await db.execute(fb_query)).one()

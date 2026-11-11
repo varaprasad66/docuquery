@@ -9,6 +9,9 @@ export interface DocRecord {
   chunk_count: number;
   progress: number;
   size_bytes: number;
+  visibility?: string;
+  /** True when ingestion finished but embedding failed: keyword-only search. */
+  degraded?: boolean;
   owner_id?: string | null;
   created_at: string;
 }
@@ -20,6 +23,11 @@ export interface Citation {
   page: number;
   location?: string | null;
   snippet: string;
+  /** Rich evidence fields (optional: pre-Phase-3 messages lack them). */
+  chunk_id?: string | null;
+  quote_start?: number | null;
+  quote_end?: number | null;
+  chunk_text?: string | null;
 }
 
 export interface ExtractFieldCitation {
@@ -68,7 +76,7 @@ export type StreamEvent =
   | { type: "meta"; conversation_id: string; retrieval_ms: number; methods: string[] }
   | { type: "citations"; citations: Citation[] }
   | { type: "token"; value: string }
-  | { type: "done"; message_id: string; prompt_tokens: number; completion_tokens: number; latency_ms: number }
+  | { type: "done"; refusal_reason?: string; unverified?: boolean; message_id: string; prompt_tokens: number; completion_tokens: number; latency_ms: number }
   | { type: "error"; error: string };
 
 export interface User {

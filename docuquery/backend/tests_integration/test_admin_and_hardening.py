@@ -48,9 +48,7 @@ class TestStatsAndAdmin(IntegrationTestCase):
 
         # Guest scope sees neither user's queries nor private docs.
         r = await self.client.get("/api/stats")
-        body = r.json()
-        self.assertEqual(body["scope"], "guest")
-        self.assertEqual(body["total_queries"], 0)
+        self.assertEqual(r.status_code, 401)
 
         # Admin sees global.
         r = await self.client.get("/api/stats", headers=self.auth_headers(self.admin_token))
