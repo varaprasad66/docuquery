@@ -109,11 +109,14 @@ def _ensure_schema() -> None:
             )
         )
         # Self-healing for columns added after this test database was first created
-        # (create_all does not ALTER existing tables).
+        # (create_all does not ALTER existing tables). Mirrors migrations 0003+0007.
         conn.execute(text("ALTER TABLE chunks ADD COLUMN IF NOT EXISTS location VARCHAR(255)"))
         conn.execute(
             text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_url VARCHAR(2048)")
         )
+        conn.execute(text("ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS refusal_reason VARCHAR(64)"))
+        conn.execute(text("ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS draft_answer TEXT"))
+        conn.execute(text("ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS prompt_chars INTEGER"))
     engine.dispose()
 
 
