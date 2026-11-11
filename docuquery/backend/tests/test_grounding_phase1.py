@@ -37,6 +37,8 @@ class TestPhase1(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.check(sources=[])).reason, "no_sources")
         self.assertEqual((await self.check("")).reason, "empty_draft")
         self.assertEqual((await self.check(REFUSAL)).reason, "model_refused")
+        self.assertEqual((await self.check(REFUSAL + " [1]")).reason, "model_refused")
+        self.assertEqual((await self.check("[1] [2]")).reason, "empty_draft")
         self.assertEqual((await self.check("25 days")).reason, "no_citation_markers")
         self.assertEqual((await self.check("25 days [99]")).reason, "invalid_marker")
         self.create.return_value = Obj(usage=None, choices=[Obj(message=Obj(content="not json"))])

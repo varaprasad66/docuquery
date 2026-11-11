@@ -1,0 +1,59 @@
+[
+  {
+    "_howto": "Copy this file (e.g. scripts/evals/my_dataset.json) and fill it in for YOUR PDF. Run: python scripts/eval_e2e.py --dataset scripts/evals/my_dataset.json --email you@example.com --password YourPassword --corpus path/to/pdf-dir --profile grounded. Compare with --profile baseline. expected_pages: the page(s) where the answer lives. expected_keywords: words that MUST appear in a good answer (numbers and distinctive nouns work best). Unanswerable questions: answerable=false, empty keywords/pages.",
+    "id": "a1",
+    "question": "[TODO: replace with a question your PDF answers on page 1, e.g. What is the total annual leave allowance?]",
+    "expected_keywords": ["25", "days"],
+    "expected_pages": [1],
+    "answerable": true
+  },
+  {
+    "id": "a2",
+    "question": "[TODO: a multi-part question, e.g. How many annual leave days are granted and how many can be rolled over?]",
+    "expected_keywords": ["25", "10"],
+    "expected_pages": [1],
+    "answerable": true
+  },
+  {
+    "id": "a3",
+    "question": "[TODO: a question answered only by a specific number, e.g. What is the invoice payment deadline in days?]",
+    "expected_keywords": ["30"],
+    "expected_pages": [2],
+    "answerable": true
+  },
+  {
+    "id": "a4",
+    "question": "[TODO: a question whose answer is on a later page, e.g. Who approves leave requests longer than two weeks?]",
+    "expected_keywords": ["manager"],
+    "expected_pages": [4],
+    "answerable": true
+  },
+  {
+    "id": "a5",
+    "question": "[TODO: a paraphrase question (no verbatim overlap), e.g. Can unused vacation days be carried into the next year?]",
+    "expected_keywords": ["rollover", "days"],
+    "expected_pages": [1, 2],
+    "answerable": true
+  },
+  {
+    "id": "u1",
+    "question": "[TODO: something your PDF does NOT cover, e.g. What is the company's parental leave policy?]",
+    "expected_keywords": [],
+    "expected_pages": [],
+    "answerable": false
+  },
+  {
+    "id": "u2",
+    "question": "[TODO: a general-knowledge trap, e.g. Who won the football world cup in 2022?]",
+    "expected_keywords": [],
+    "expected_pages": [],
+    "answerable": false
+  },
+  {
+    "id": "u3",
+    "question": "[TODO: related topic, wrong scope, e.g. How do I install the software mentioned in the document?]",
+    "expected_keywords": [],
+    "expected_pages": [],
+    "answerable": false
+  }
+]

@@ -15,8 +15,13 @@ def build_prompt(question, standalone, history, sources, context_builder):
         context = context_builder(selected) if selected else "NO EXCERPTS AVAILABLE."
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages += [{"role": m.role, "content": m.content[:s.history_max_chars]} for m in prior]
-        rewritten = f"\nSTANDALONE QUESTION: {standalone}" if s.answer_include_rewritten_question else ""
-        messages.append({"role": "user", "content": f"CONTEXT:\n{context}\n\nORIGINAL QUESTION: {question}{rewritten}\n\nAnswer using only the context. Always cite as [n], using only the supplied excerpt numbers."})
+        # The standalone line only helps when the rewrite actually changed
+        # something; repeating the question verbatim nudges small models into
+        # mimicking the citation placeholder instead of answering.
+        rewritten = ""
+        if s.answer_include_rewritten_question and standalone and standalone.strip() != question:
+            rewritten = f"\nSTANDALONE QUESTION: {standalone}"
+        messages.append({"role": "user", "content": f"CONTEXT:\n{context}\n\nORIGINAL QUESTION: {question}{rewritten}\n\nAnswer using only the context above. Cite the excerpt numbers you use in square brackets."})
         return context, messages, sum(len(m["content"]) for m in messages)
 
     context, messages, chars = assemble()

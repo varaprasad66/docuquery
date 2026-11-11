@@ -172,7 +172,13 @@ async def verify_answer(client, question, answer, sources, citations):
         return GroundingResult(REFUSAL, [], reason="no_sources")
     if not answer or not answer.strip():
         return GroundingResult(REFUSAL, [], reason="empty_draft")
-    if answer.strip().casefold() == REFUSAL.casefold():
+    # A refusal with stray citation markers, or a draft consisting of nothing
+    # but markers (small models sometimes emit just "[1]"), carries no
+    # answerable content.
+    without_markers = re.sub(r"\s*\[\d+\]\s*", " ", answer).strip()
+    if not without_markers:
+        return GroundingResult(REFUSAL, [], reason="empty_draft")
+    if without_markers.casefold() == REFUSAL.casefold():
         return GroundingResult(REFUSAL, [], reason="model_refused")
     cited = {int(n) for n in re.findall(r"\[(\d+)\]", answer)}
     if not cited:
