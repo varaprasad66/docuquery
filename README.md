@@ -4,7 +4,7 @@ Document question answering with source citations. React and TypeScript provide 
 
 ## Status
 
-Local development application with production deployment configuration. Public hosting, backup restoration and hosted AI acceptance remain pending. See [verification](docs/verification-results.md) and [limitations](docs/known-limitations.md). Citations help verify answers; they do not guarantee factual accuracy.
+Local development application with production deployment configuration. Public hosting, backup restoration and hosted AI acceptance remain pending.  Citations help verify answers; they do not guarantee factual accuracy.
 
 ## Run locally on Windows
 
@@ -79,4 +79,4 @@ Retrieved excerpts are candidates, not citations. The API buffers the draft, che
 This increases response time and model usage. Model verification can still make mistakes; a matching quotation alone does not prove that an inference is correct. Evaluate representative answerable and unanswerable questions before deploying. The optional answer cache now requires the exact question and matching model/prompt/tenant/document scope; it remains disabled by default.
 
 
-For compound questions, supported parts are answered with citations and missing parts should be identified explicitly. A partial answer is not automatically refused. Extract supports invoice and contract templates, previews expected fields, labels missing values and allows CSV/JSON export. Its confidence label is the model's estimate, not a calibrated accuracy score. Review extracted values against the source before using them in business workflows. See [the timed portfolio demonstration script](docs/demo-script.md).
+For compound questions, supported parts are answered with citations and missing parts should be identified explicitly. A partial answer is not automatically refused. Extract supports invoice and contract templates, previews expected fields, labels missing values and allows CSV/JSON export. Its confidence label is the model's estimate, not a calibrated accuracy score. Review extracted values against the source before using them in business workflows. 
