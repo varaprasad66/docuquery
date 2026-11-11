@@ -150,7 +150,12 @@ class Citation(BaseModel):
     document_name: str
     page: int
     location: str | None = None  # "Slide 2", "Sheet 'X' rows 5-24", ... for non-PDF formats
-    snippet: str
+    # Optional since migration-era messages predate the richer citation payload.
+    snippet: str = ""
+    chunk_id: uuid.UUID | None = None
+    quote_start: int | None = None  # char offsets of the supporting quote
+    quote_end: int | None = None  # within the original chunk text
+    chunk_text: str | None = None  # full stored chunk for in-context highlighting
 
 
 class MessageOut(BaseModel):

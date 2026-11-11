@@ -23,6 +23,11 @@ export interface Citation {
   page: number;
   location?: string | null;
   snippet: string;
+  /** Rich evidence fields (optional: pre-Phase-3 messages lack them). */
+  chunk_id?: string | null;
+  quote_start?: number | null;
+  quote_end?: number | null;
+  chunk_text?: string | null;
 }
 
 export interface ExtractFieldCitation {

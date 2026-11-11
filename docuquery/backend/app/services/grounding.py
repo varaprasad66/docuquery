@@ -39,6 +39,90 @@ def normalize_quote(text):
     return " ".join(text.split()).casefold()
 
 
+def _normalized_index_map(text):
+    """Build the normalized form of `text` while tracking, for every normalized
+    character, its source index in the ORIGINAL text. Reproduces normalize_quote's
+    transformations (NFKC, soft-hyphen and hyphenation removal, whitespace
+    collapse, casefold) so quote offsets can be mapped back for highlighting."""
+    normalized: list[str] = []
+    positions: list[int] = []
+    pending_space = False
+    i, length = 0, len(text)
+    hyphenation = re.compile(r"(?<=\w)-\s*\n\s*(?=\w)")
+    while i < length:
+        char = text[i]
+        if char == "-" and i > 0:
+            match = hyphenation.match(text, i)
+            if match:
+                i = match.end()  # join the hyphenated word; removed chars vanish
+                continue
+        if char == "\u00ad":  # soft hyphen disappears entirely
+            i += 1
+            continue
+        mapped = unicodedata.normalize("NFKC", char).casefold()
+        if mapped.isspace() or char.isspace():
+            pending_space = bool(normalized)  # collapse runs, keep leading position
+            i += 1
+            continue
+        if pending_space:
+            normalized.append(" ")
+            positions.append(i)
+            pending_space = False
+        for part in mapped:
+            normalized.append(part)
+            positions.append(i)
+        i += 1
+    return "".join(normalized), positions
+
+
+def locate_quote(content: str, quote: str) -> tuple[int, int] | None:
+    """Best-effort (start, end) char offsets of `quote` inside the ORIGINAL
+    chunk text. Exact substring first; otherwise rapidfuzz aligns the
+    whitespace/unicode-normalized quote within the normalized content and the
+    match is mapped back through the index map. Returns None when no confident
+    alignment exists."""
+    if not quote or not quote.strip() or not content:
+        return None
+    start = content.find(quote)
+    if start >= 0:
+        return start, start + len(quote)
+    try:
+        from rapidfuzz.fuzz import partial_ratio_alignment
+
+        normalized_content, positions = _normalized_index_map(content)
+        normalized_quote, _ = _normalized_index_map(quote)
+        if len(normalized_quote) < 4:
+            return None
+        alignment = partial_ratio_alignment(normalized_quote, normalized_content)
+        if alignment is None or alignment.score < get_settings().grounding_quote_threshold:
+            return None
+        return positions[alignment.dest_start], positions[alignment.dest_end - 1] + 1
+    except Exception:
+        return None
+
+
+def renumber_citations(answer: str, citations: list) -> tuple[str, list]:
+    """Renumber [n] markers in the final answer by order of first appearance
+    (1, 2, 3, ...), rewriting the markers consistently. Citations never
+    referenced by the answer are dropped. Pure function — unit tested."""
+    referenced: list[int] = []
+    for match in re.finditer(r"\[(\d+)\]", answer):
+        n = int(match.group(1))
+        if n not in referenced:
+            referenced.append(n)
+    by_n = {c["n"]: c for c in citations}
+    mapping = {n: i + 1 for i, n in enumerate(referenced) if n in by_n}
+    if not mapping:
+        return answer, []
+    rewritten = re.sub(
+        r"\[(\d+)\]",
+        lambda m: f"[{mapping[int(m.group(1))]}]" if int(m.group(1)) in mapping else m.group(0),
+        answer,
+    )
+    reordered = [{**by_n[n], "n": mapping[n]} for n in referenced if n in by_n]
+    return rewritten, reordered
+
+
 def sentences(text):
     return [part.strip() for part in re.split(r"(?<=[.!?])\s+(?=[A-Z\[]|$)|\n+", text) if part.strip()]
 

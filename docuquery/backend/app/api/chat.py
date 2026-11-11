@@ -36,7 +36,7 @@ from app.services import query_rewriter, semantic_cache
 from app.services.costs import calculate_cost_usd
 from app.services.llm import llm_client
 from app.services.prompting import build_prompt
-from app.services.grounding import REFUSAL, GroundingResult, verify_answer
+from app.services.grounding import REFUSAL, GroundingResult, locate_quote, renumber_citations, verify_answer
 from app.services.retrieval import Source, retrieve
 
 logger = logging.getLogger(__name__)
@@ -88,6 +88,29 @@ async def _get_owned_conversation(
         if conversation.owner_id is not None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found.")
     return conversation
+
+
+def _enrich_citations(citations: list[dict], sources: list[Source]) -> list[dict]:
+    """Attach chunk identity, full chunk text and the supporting quote's char
+    offsets so the UI can highlight the evidence inside the chunk. Offsets are
+    best-effort: auto-attributed citations carry no verifier quote."""
+    enriched = []
+    for citation in citations:
+        index = citation.get("n", 0) - 1
+        if 0 <= index < len(sources):
+            source = sources[index]
+            citation = {
+                **citation,
+                "chunk_id": str(source.chunk_id),
+                "chunk_text": source.content[:4000],
+            }
+            snippet = citation.get("snippet")
+            if snippet:
+                offsets = locate_quote(source.content, snippet)
+                if offsets:
+                    citation["quote_start"], citation["quote_end"] = offsets
+        enriched.append(citation)
+    return enriched
 
 
 def _sse(event: dict) -> str:
@@ -289,6 +312,11 @@ async def chat(
                     client, body.question, draft_answer, sources, citations,
                 )
             answer, citations, verifier_prompt, verifier_completion, refusal_reason, unverified = result
+            # Cite in order of first appearance; attach chunk identity + quote
+            # offsets for the citation inspector (enrich before renumbering so
+            # the source lookup uses the retrieval numbering).
+            citations = _enrich_citations(citations, sources)
+            answer, citations = renumber_citations(answer, citations)
             logger.info("reason=%s prompt_chars=%d chunks=%s", refusal_reason, prompt_chars, [str(source.chunk_id) for source in sources])
             prompt_tokens += verifier_prompt
             completion_tokens += verifier_completion

@@ -119,6 +119,19 @@ export async function reembedDocument(id: string): Promise<DocRecord> {
   );
 }
 
+export async function openDocumentAtPage(documentId: string, page: number): Promise<void> {
+  /** Fetch the source PDF with auth headers and open the browser PDF viewer at
+   * the cited page (#page=N works on blob: URLs in Chromium and Firefox). */
+  const res = await safeFetch(`${BASE}/documents/${documentId}/download`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Could not fetch the source document.");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  window.open(`${url}#page=${page}`, "_blank", "noopener");
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 export async function importDocumentFromUrl(url: string): Promise<DocRecord> {
   return json(
     await safeFetch(`${BASE}/documents/url`, {
