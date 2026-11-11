@@ -18,10 +18,10 @@ with psycopg.connect(server, autocommit=True) as connection:
         subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=backend, env=env, check=True)
         with psycopg.connect(server.rsplit("/", 1)[0] + "/" + name) as test_db:
             version = test_db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            assert version == "0006", version
+            assert version == "0008", version
             assert test_db.execute("SELECT to_regclass('storage_cleanup')").fetchone()[0]
             assert test_db.execute("SELECT to_regclass('ix_chunks_embedding')").fetchone()[0]
             assert test_db.execute("SELECT format_type(atttypid, atttypmod) FROM pg_attribute WHERE attrelid='chunks'::regclass AND attname='embedding'").fetchone()[0] == "vector(768)"
-        print("PASS: fresh Alembic migration reaches 0006; cleanup table and vector index verified")
+        print("PASS: fresh Alembic migration reaches 0008; cleanup table and vector index verified")
     finally:
         connection.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))

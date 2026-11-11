@@ -102,6 +102,10 @@ class Document(TimestampMixin, Base):
         server_default="public",
         index=True,
     )
+    # True when ingestion finished but embedding failed: the document is
+    # searchable by keyword (BM25) only. Cleared by a successful re-embed
+    # (POST /api/documents/{id}/reembed). Migration 0008.
+    degraded: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
 
     owner: Mapped[User | None] = relationship(back_populates="documents")
     chunks: Mapped[list["Chunk"]] = relationship(

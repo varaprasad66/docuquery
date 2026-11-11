@@ -36,7 +36,7 @@ from app.services import query_rewriter, semantic_cache
 from app.services.costs import calculate_cost_usd
 from app.services.llm import llm_client
 from app.services.prompting import build_prompt
-from app.services.grounding import verify_answer
+from app.services.grounding import REFUSAL, GroundingResult, verify_answer
 from app.services.retrieval import Source, retrieve
 
 logger = logging.getLogger(__name__)
@@ -48,10 +48,11 @@ SANITIZED_STREAM_ERROR = "The assistant is temporarily unavailable. Please try a
 
 def _build_context(sources: list[Source]) -> str:
     """Excerpts are untrusted document data: they are wrapped in explicit
-    delimiters so prompt-injection text inside documents stays data."""
+    delimiters so prompt-injection text inside documents stays data. Each
+    excerpt carries its neighbor-expanded context (if any)."""
     parts = []
     for i, s in enumerate(sources, start=1):
-        parts.append(f"[{i}] ({s.document_name}, {s.source_label})\n{s.content}")
+        parts.append(f"[{i}] ({s.document_name}, {s.source_label})\n{s.context_text}")
     body = "\n\n".join(parts)
     return (
         "<untrusted_document_context>\n"
@@ -152,7 +153,7 @@ async def chat(
                 try:
                     from app.services.embeddings import embed_texts
 
-                    qvec = (await embed_texts([search_query]))[0]
+                    qvec = (await embed_texts([search_query], task="query"))[0]
                     qvec_literal = "[" + ",".join(f"{x:.7g}" for x in qvec) + "]"
                     hit = await semantic_cache.lookup(
                         db, owner_id, qvec_literal, search_query,
@@ -224,6 +225,25 @@ async def chat(
                 "cached": False,
             })
 
+            # --- Relevance floor: below it, refuse rather than guess ---
+            # Applies to the reranker score when RERANKER_ENABLED, else to the
+            # best primitive score (vector cosine / keyword rank) kept through
+            # fusion. 0.0 disables the check entirely.
+            low_relevance = False
+            if sources and settings.min_relevance > 0:
+                best = max(
+                    (s.score if settings.reranker_enabled else s.relevance) for s in sources
+                )
+                if best < settings.min_relevance:
+                    logger.info(
+                        "reason=relevance_floor best_score=%.3f floor=%.3f chunks=%d",
+                        best, settings.min_relevance, len(sources),
+                    )
+                    low_relevance = True
+            if low_relevance:
+                # Below the floor: skip generation entirely, refuse explicitly.
+                sources = []
+
             sources, context, messages, prompt_chars = build_prompt(body.question, search_query, history[:-1], sources, _build_context)
             citations = [
                 Citation(
@@ -262,9 +282,12 @@ async def chat(
                         answer_parts.append(delta)
 
             draft_answer = "".join(answer_parts).strip()
-            result = await verify_answer(
-                client, body.question, draft_answer, sources, citations,
-            )
+            if low_relevance:
+                result = GroundingResult(REFUSAL, [], 0, 0, "low_relevance", False)
+            else:
+                result = await verify_answer(
+                    client, body.question, draft_answer, sources, citations,
+                )
             answer, citations, verifier_prompt, verifier_completion, refusal_reason, unverified = result
             logger.info("reason=%s prompt_chars=%d chunks=%s", refusal_reason, prompt_chars, [str(source.chunk_id) for source in sources])
             prompt_tokens += verifier_prompt
@@ -306,7 +329,7 @@ async def chat(
                     retrieved_chunk_ids=[str(s.chunk_id) for s in sources],
                     refusal_reason=refusal_reason,
                     prompt_chars=prompt_chars,
-                    draft_answer=draft_answer[:4000] if (settings.log_draft_answers if settings.log_draft_answers is not None else not settings.is_production) else None,
+                    draft_answer=(draft_answer[:4000] or None) if (settings.log_draft_answers if settings.log_draft_answers is not None else not settings.is_production) else None,
                 )
             )
             await db.commit()
@@ -317,7 +340,7 @@ async def chat(
                 try:
                     from app.services.embeddings import embed_texts
 
-                    qvec = (await embed_texts([search_query]))[0]
+                    qvec = (await embed_texts([search_query], task="query"))[0]
                     qvec_literal = "[" + ",".join(f"{x:.7g}" for x in qvec) + "]"
                     await semantic_cache.store(
                         db, owner_id, search_query, qvec_literal, answer, citations,

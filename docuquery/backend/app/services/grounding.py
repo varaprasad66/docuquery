@@ -57,14 +57,19 @@ async def attribute(answer, sources, citations, reason):
     if not settings.grounding_auto_attribution or not parts:
         return GroundingResult(REFUSAL, [], reason=reason)
     try:
-        vectors = await embed_texts(parts + [s.content for s in sources])
-        if len(vectors) != len(parts) + len(sources):
+        # Answer sentences embed as queries; chunk texts as documents (task
+        # prefixes matter for nomic-embed-text).
+        part_vectors, chunk_vectors = await asyncio.gather(
+            embed_texts(parts, task="query"),
+            embed_texts([s.context_text for s in sources], task="document"),
+        )
+        if len(part_vectors) != len(parts) or len(chunk_vectors) != len(sources):
             raise ValueError("embedding_count")
     except Exception:
         return GroundingResult(REFUSAL, [], reason=reason)
     output, used = [], set()
     for index, part in enumerate(parts):
-        scores = [cosine(vectors[index], vector) for vector in vectors[len(parts):]]
+        scores = [cosine(part_vectors[index], vector) for vector in chunk_vectors]
         best = max(range(len(scores)), key=scores.__getitem__)
         if scores[best] >= settings.grounding_similarity_threshold:
             output.append(f"{part} [{best+1}]")
@@ -98,7 +103,7 @@ async def verify_answer(client, question, answer, sources, citations):
             max_tokens=1500, stream=False, response_format={"type": "json_object"},
             messages=[{"role": "system", "content": VERIFIER_PROMPT}, {"role": "user", "content": json.dumps({
                 "question": question, "draft": answer,
-                "sources": [{"n": n, "text": sources[n-1].content} for n in sorted(cited & valid)]})}],
+                "sources": [{"n": n, "text": sources[n-1].context_text} for n in sorted(cited & valid)]})}],
         ), timeout=settings.verifier_timeout_seconds)
         usage = response.usage
         prompt_tokens = usage.prompt_tokens if usage else 0
@@ -118,7 +123,7 @@ async def verify_answer(client, question, answer, sources, citations):
             n, quote = item.get("n"), item.get("quote")
             if type(n) is not int or n not in cited & valid or not isinstance(quote, str):
                 continue
-            normalized, content = normalize_quote(quote), normalize_quote(sources[n-1].content)
+            normalized, content = normalize_quote(quote), normalize_quote(sources[n-1].context_text)
             matches = normalized in content
             if settings.grounding_fuzzy_quotes:
                 matches = partial_ratio(normalized, content) >= settings.grounding_quote_threshold

@@ -109,7 +109,7 @@ def _ensure_schema() -> None:
             )
         )
         # Self-healing for columns added after this test database was first created
-        # (create_all does not ALTER existing tables). Mirrors migrations 0003+0007.
+        # (create_all does not ALTER existing tables). Mirrors migrations 0003+0007+0008.
         conn.execute(text("ALTER TABLE chunks ADD COLUMN IF NOT EXISTS location VARCHAR(255)"))
         conn.execute(
             text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_url VARCHAR(2048)")
@@ -117,6 +117,9 @@ def _ensure_schema() -> None:
         conn.execute(text("ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS refusal_reason VARCHAR(64)"))
         conn.execute(text("ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS draft_answer TEXT"))
         conn.execute(text("ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS prompt_chars INTEGER"))
+        conn.execute(
+            text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS degraded BOOLEAN NOT NULL DEFAULT false")
+        )
     engine.dispose()
 
 
@@ -143,11 +146,11 @@ def _fake_vector(text: str) -> list[float]:
     return [x / norm for x in vec]
 
 
-def fake_embed_texts(texts: list[str]) -> list[list[float]]:
+def fake_embed_texts(texts: list[str], task: str | None = None) -> list[list[float]]:
     return [_fake_vector(t) for t in texts]
 
 
-def fake_embed_texts_sync(texts: list[str]) -> list[list[float]]:
+def fake_embed_texts_sync(texts: list[str], task: str | None = None) -> list[list[float]]:
     return [_fake_vector(t) for t in texts]
 
 
@@ -268,7 +271,7 @@ def patch_embeds_everywhere() -> None:
     import app.services.embeddings as emb
     import app.services.retrieval as retrieval
 
-    async def _async_embed(texts):
+    async def _async_embed(texts, task: str | None = None):
         return fake_embed_texts(texts)
 
     chat_api.embed_texts = _async_embed

@@ -9,6 +9,9 @@ export interface DocRecord {
   chunk_count: number;
   progress: number;
   size_bytes: number;
+  visibility?: string;
+  /** True when ingestion finished but embedding failed: keyword-only search. */
+  degraded?: boolean;
   owner_id?: string | null;
   created_at: string;
 }

@@ -110,6 +110,15 @@ export async function retryDocument(id: string): Promise<DocRecord> {
   );
 }
 
+export async function reembedDocument(id: string): Promise<DocRecord> {
+  return json(
+    await safeFetch(`${BASE}/documents/${id}/reembed`, {
+      method: "POST",
+      headers: authHeaders(),
+    }),
+  );
+}
+
 export async function importDocumentFromUrl(url: string): Promise<DocRecord> {
   return json(
     await safeFetch(`${BASE}/documents/url`, {

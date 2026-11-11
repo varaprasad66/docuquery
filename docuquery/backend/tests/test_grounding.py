@@ -13,8 +13,9 @@ class TestGrounding(unittest.IsolatedAsyncioTestCase):
             setting = patch.object(get_settings(), key, value)
             setting.start()
             self.addCleanup(setting.stop)
-        self.sources = [SimpleNamespace(content="Annual leave is 25 days per year."),
-                        SimpleNamespace(content="Invoices must be paid within 30 days.")]
+        # context_text mirrors content: no neighbor expansion in these fixtures.
+        self.sources = [SimpleNamespace(content="Annual leave is 25 days per year.", context_text="Annual leave is 25 days per year."),
+                        SimpleNamespace(content="Invoices must be paid within 30 days.", context_text="Invoices must be paid within 30 days.")]
         self.citations = [{"n": 1}, {"n": 2}]
         self.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock())))
 

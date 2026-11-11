@@ -102,9 +102,41 @@ class Settings(BaseSettings):
     query_rewrite_timeout_seconds: int = 8
     # Optional local cross-encoder reranker (needs the `sentence-transformers`
     # extra: pip install -e ".[rerank]"). Disabled by default; any failure
-    # falls back to the fused RRF order.
+    # falls back to the fused RRF order. "BAAI/bge-reranker-base" is a tested
+    # alternative RERANKER_MODEL.
     reranker_enabled: bool = False
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_candidates: int = Field(default=20, ge=1, le=100)  # candidate pool when reranking
+    # Relevance floor: 0.0 disables (never refuses previously-answerable cases).
+    # When RERANKER_ENABLED it applies to the (sigmoid-normalized) reranker score,
+    # otherwise to the best vector cosine similarity. Below the floor the chat
+    # returns a refusal with reason "low_relevance" instead of guessing.
+    min_relevance: float = Field(default=0.0, ge=0, le=1)
+    # Neighbor expansion: after final ranking, attach the previous/next chunk
+    # (same document, by chunk_index) to each hit so answers spanning a chunk
+    # boundary keep their context. Citations still point at the hit chunk.
+    neighbor_expansion: bool = True
+    neighbor_window: int = Field(default=1, ge=0, le=3)
+    # Keyword leg: drop stop words and build the tsquery with
+    # websearch_to_tsquery (never raises on odd input) instead of raw to_tsquery.
+    keyword_websearch_tsquery: bool = True
+
+    # Embedding task prefixes. nomic-embed-text was trained with
+    # "search_document: " / "search_query: " task prompts; empty both for other
+    # models. Changing either requires a reindex (scripts/reindex_embeddings.py).
+    embed_doc_prefix: str = "search_document: "
+    embed_query_prefix: str = "search_query: "
+    # Version tag written to chunks.embedding_model so stale vectors can be
+    # detected and re-indexed (e.g. "nomic-embed-text+prefix-v1").
+    embedding_version_tag: str = "prefix-v1"
+    # Prepend "Document: <name> | <location>" to the text sent to the embedder
+    # (display/storage text stays clean).
+    contextual_embeddings: bool = True
+
+    # PDF extraction: "plain" (PyMuPDF text layer + OCR fallback) or
+    # "markdown" (pymupdf4llm layout-aware Markdown, headings/tables survive;
+    # no OCR fallback in this mode).
+    pdf_extractor: Literal["plain", "markdown"] = "plain"
 
     # Structured extraction (professional edition). Chunks per document fed to
     # the model, in document order; extraction answers get their own token cap.

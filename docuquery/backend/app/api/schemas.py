@@ -89,6 +89,7 @@ class DocumentOut(BaseModel):
     progress: float
     size_bytes: int
     visibility: str = "public"
+    degraded: bool = False
     owner_id: uuid.UUID | None = None
     created_at: datetime
 

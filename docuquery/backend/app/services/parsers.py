@@ -192,6 +192,44 @@ def parse_pdf(path: Path, progress_cb: SectionProgressCb | None = None) -> list[
     ]
 
 
+def parse_pdf_markdown(path: Path, progress_cb: SectionProgressCb | None = None) -> list[SectionText]:
+    """Layout-aware PDF extraction (PDF_EXTRACTOR=markdown).
+
+    pymupdf4llm renders each page as Markdown — headings, lists and tables
+    survive as structure — and the page is then split on ATX headings so
+    sections chunk by topic first. Citations keep page granularity. There is
+    no OCR fallback in this mode: scanned pages yield little or no Markdown and
+    come through as short/empty sections (use "plain" for scanned documents).
+    Falls back to the plain parser if pymupdf4llm is unavailable.
+    """
+    try:
+        import pymupdf
+        import pymupdf4llm
+    except ImportError:
+        logger.warning("pymupdf4llm not installed; reason=markdown_extractor_unavailable; falling back to plain extraction")
+        return parse_pdf(path, progress_cb=progress_cb)
+
+    sections: list[SectionText] = []
+    with pymupdf.open(path) as doc:
+        if getattr(doc, "needs_pass", False) and not doc.authenticate(""):
+            raise ValueError("Password-protected PDFs are not supported.")
+        total = doc.page_count
+        for i in range(total):
+            page_no = i + 1
+            markdown = pymupdf4llm.to_markdown(doc, pages=[i])
+            for location, text in _split_markdown(markdown):
+                label = f"Page {page_no}" if location == "Document" else f"Page {page_no} · {location}"
+                sections.append(
+                    SectionText(index=len(sections) + 1, text=text, location=_location_label(label))
+                )
+            if progress_cb:
+                try:
+                    progress_cb(page_no, total)
+                except Exception:
+                    logger.debug("Optional PDF progress callback failed", exc_info=True)
+    return sections
+
+
 def _location_label(label: str) -> str:
     label = re.sub(r"\s+", " ", label).strip()
     return label[:80] + ("…" if len(label) > 80 else "")

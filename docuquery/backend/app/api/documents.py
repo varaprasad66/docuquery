@@ -373,6 +373,51 @@ async def retry_document(
     return doc
 
 
+@router.post("/{document_id}/reembed", response_model=DocumentOut, dependencies=[Depends(require_api_key_scope("upload"))])
+async def reembed_document(
+    document_id: uuidlib.UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    """Re-embed a degraded (keyword-only) document, or one indexed with an old
+    embedding configuration. Chunks are re-embedded in place — no re-parsing."""
+    doc = await db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found.")
+    ensure_document_mutate(user, doc)
+    if doc.status != DocumentStatus.ready:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Only processed documents can be re-embedded. Retry processing first.",
+        )
+    if doc.chunk_count == 0:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Document has no indexed chunks.")
+
+    doc.status = DocumentStatus.processing
+    doc.progress = 0.05
+    ip, ua = await client_identity(request)
+    await record_audit(
+        db, "doc.reembed", actor_id=user.id if user else None, resource_type="document",
+        resource_id=str(doc.id), ip=ip, user_agent=ua,
+    )
+    await db.commit()
+    await db.refresh(doc)
+
+    from app.workers.tasks import reembed_document as reembed_task, reembed_document_core
+
+    if get_settings().use_celery:
+        try:
+            reembed_task.delay(str(doc.id))
+        except Exception:
+            logger.warning("Broker unavailable; re-embedding inline", exc_info=True)
+            await asyncio.to_thread(reembed_document_core, str(doc.id))
+    else:
+        background_tasks.add_task(reembed_document_core, str(doc.id))
+    return doc
+
+
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_api_key_scope("upload"))])
 async def delete_document(
     document_id: uuidlib.UUID,

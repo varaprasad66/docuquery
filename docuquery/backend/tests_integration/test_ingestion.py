@@ -205,8 +205,12 @@ class TestMultiFormatIngestion(IntegrationTestCase):
         )
         results = r.json()["results"]
         self.assertTrue(results)
-        hit = next(x for x in results if x["document_name"] == "payroll.xlsx")
-        self.assertEqual(hit["location"], "Sheet 'Payroll' rows 52-61")
+        # The Emp-57 chunk must be found with its exact row-range location.
+        # (Its rank may vary with embedding settings; location must not.)
+        hit = next(
+            x for x in results
+            if x["document_name"] == "payroll.xlsx" and x["location"] == "Sheet 'Payroll' rows 52-61"
+        )
         self.assertIn("Columns: Employee | Salary", hit["snippet"])
 
     async def test_md_upload_search(self):

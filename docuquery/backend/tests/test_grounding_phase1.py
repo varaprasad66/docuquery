@@ -13,7 +13,9 @@ class TestPhase1(unittest.IsolatedAsyncioTestCase):
         self.settings = get_settings()
         self.config("grounding_mode", "strict")
         self.config("grounding_auto_attribution", False)
-        self.sources = [Obj(content="Annual leave is 25 days per year."), Obj(content="Invoices are due within thirty days.")]
+        # context_text mirrors content: no neighbor expansion in these fixtures.
+        self.sources = [Obj(content="Annual leave is 25 days per year.", context_text="Annual leave is 25 days per year."),
+                        Obj(content="Invoices are due within thirty days.", context_text="Invoices are due within thirty days.")]
         self.citations = [{"n": 1}, {"n": 2}]
         self.create = AsyncMock()
         self.client = Obj(chat=Obj(completions=Obj(create=self.create)))
@@ -56,11 +58,18 @@ class TestPhase1(unittest.IsolatedAsyncioTestCase):
     async def test_auto_attribution_and_timeout_fallback(self):
         self.config("grounding_mode", "soft")
         self.config("grounding_auto_attribution", True)
-        with patch("app.services.grounding.embed_texts", AsyncMock(return_value=[[1, 0], [1, 0], [0, 1]])):
+        # attribute() embeds answer sentences (task="query") and sources
+        # (task="document") in two separate calls; each call returns a list of
+        # vectors — one per input text.
+        embed = AsyncMock(side_effect=[[[1, 0]], [[1, 0], [0, 1]]])
+        with patch("app.services.grounding.embed_texts", embed):
             result = await self.check("Leave is 25 days.")
             self.assertIn("[1]", result.answer)
             self.assertTrue(result.unverified)
+            self.assertEqual(embed.await_args_list[0].kwargs.get("task"), "query")
+            self.assertEqual(embed.await_args_list[1].kwargs.get("task"), "document")
             self.create.side_effect = TimeoutError()
+            embed.side_effect = [[[1, 0]], [[1, 0], [0, 1]]]  # fresh vectors for the fallback path
             result = await self.check("Leave is 25 days [1].")
             self.assertTrue(result.unverified)
             self.assertEqual(result.reason, "verifier_error")
